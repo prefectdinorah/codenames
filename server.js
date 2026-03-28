@@ -522,7 +522,11 @@ wss.on('connection', (ws) => {
       clearVotes(currentRoom);
       currentRoom.game = createGame(currentRoom.settings);
 
-      const allIds = [...currentRoom.players.keys()];
+      // Only shuffle players who are NOT spectators
+      const allIds = [...currentRoom.players.entries()]
+        .filter(([, p]) => p.team !== null)
+        .map(([id]) => id);
+      if (allIds.length === 0) { broadcastRoom(currentRoom); return; }
       const shuffled = shuffle(allIds);
       const teams = currentRoom.game.teams;
       let idx = 0;
