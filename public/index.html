@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codenames</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Join overlay (shown when not in a room) -->
+  <div id="join-overlay" class="overlay active">
+    <div class="join-box">
+      <h1>Codenames</h1>
+      <input type="text" id="player-name" placeholder="Твоё имя" maxlength="20" autocomplete="off">
+      <button id="btn-create">Создать комнату</button>
+      <div class="divider">или</div>
+      <input type="text" id="room-code-input" placeholder="Код комнаты" maxlength="4" autocomplete="off">
+      <button id="btn-join">Присоединиться</button>
+      <div id="join-error" class="error"></div>
+    </div>
+  </div>
+
+  <!-- Game screen (always visible once joined) -->
+  <div id="game-screen" class="game-screen hidden">
+
+    <!-- Top bar -->
+    <div class="top-bar">
+      <div class="top-left">
+        <span class="room-label">Комната:</span>
+        <span id="room-code" class="room-code"></span>
+      </div>
+      <div class="top-center">
+        <div id="scores-bar" class="scores-bar"></div>
+      </div>
+      <div class="top-right">
+        <div id="name-editor" class="name-editor">
+          <input type="text" id="name-input" maxlength="20" autocomplete="off" placeholder="Имя">
+          <button id="btn-change-name" title="Сменить имя">&#10003;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn / clue / timer bar -->
+    <div class="info-bar">
+      <div id="turn-indicator" class="turn-indicator"></div>
+      <div id="timer-display" class="timer-display hidden"></div>
+      <div id="clue-display" class="clue-display"></div>
+      <div class="action-buttons">
+        <button id="btn-pause" class="btn-action" title="Пауза">&#9208; Пауза</button>
+        <button id="btn-restart" class="btn-action host-only hidden" title="Рестарт">&#8635; Рестарт</button>
+        <button id="btn-shuffle" class="btn-action host-only hidden" title="Перемешать игроков">&#8645; Шафл</button>
+        <div id="settings-wrap" class="settings-wrap host-only hidden">
+          <button id="btn-settings" class="btn-action" title="Настройки">&#9881; Настройки</button>
+          <div id="settings-dropdown" class="settings-dropdown hidden">
+            <label>Команды
+              <select id="s-teams">
+                <option value="2">2</option><option value="3">3</option>
+                <option value="4">4</option><option value="5">5</option>
+              </select>
+            </label>
+            <label>Строки
+              <select id="s-rows">
+                <option value="4">4</option><option value="5" selected>5</option>
+                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
+              </select>
+            </label>
+            <label>Столбцы
+              <select id="s-cols">
+                <option value="4">4</option><option value="5" selected>5</option>
+                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
+              </select>
+            </label>
+            <label>Таймер
+              <select id="s-timer">
+                <option value="0">Выкл</option>
+                <option value="30">30с</option><option value="60">60с</option>
+                <option value="90">90с</option><option value="120">120с</option>
+                <option value="180">180с</option>
+              </select>
+            </label>
+            <button id="btn-apply-settings">Применить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main area: clue history + board + clue history -->
+    <div class="game-body">
+      <div id="clue-history-left" class="clue-sidebar"></div>
+      <div class="board-area">
+        <div id="board" class="board"></div>
+        <div id="clue-form" class="clue-form hidden">
+          <input type="text" id="clue-word" placeholder="Подсказка" maxlength="30" autocomplete="off">
+          <input type="number" id="clue-count" placeholder="0" min="0" max="25" value="">
+          <button id="btn-give-clue">Дать подсказку</button>
+        </div>
+        <button id="btn-end-turn" class="btn-end-turn hidden">Завершить ход</button>
+      </div>
+      <div id="clue-history-right" class="clue-sidebar"></div>
+    </div>
+
+    <!-- Player panel: teams + spectators -->
+    <div id="player-panel" class="player-panel"></div>
+
+    <!-- Pause overlay -->
+    <div id="pause-overlay" class="pause-overlay hidden">
+      <div class="pause-content">
+        <div class="pause-text">Пауза</div>
+        <button id="btn-unpause" class="btn-unpause">&#9654; Продолжить</button>
+      </div>
+    </div>
+
+    <!-- Winner overlay -->
+    <div id="winner-overlay" class="winner-overlay hidden">
+      <div id="winner-text" class="winner-text"></div>
+      <button id="btn-new-game-win">Новая игра</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
