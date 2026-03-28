@@ -30,14 +30,24 @@ function send(msg) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
+// ===== Saved name =====
+const savedName = localStorage.getItem('codenames-name') || '';
+if (savedName) $('#player-name').value = savedName;
+
+function getPlayerName() {
+  const name = $('#player-name').value.trim() || 'Игрок';
+  localStorage.setItem('codenames-name', name);
+  return name;
+}
+
 // ===== Join overlay =====
 $('#btn-create').onclick = () => {
-  send({ type: 'create-room', name: $('#player-name').value.trim() || 'Игрок' });
+  send({ type: 'create-room', name: getPlayerName() });
 };
 $('#btn-join').onclick = () => {
   const code = $('#room-code-input').value.trim();
   if (!code) return;
-  send({ type: 'join-room', name: $('#player-name').value.trim() || 'Игрок', code });
+  send({ type: 'join-room', name: getPlayerName(), code });
 };
 $('#room-code-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('#btn-join').click();
@@ -46,7 +56,10 @@ $('#room-code-input').addEventListener('keydown', (e) => {
 // ===== Name editing =====
 $('#btn-change-name').onclick = () => {
   const name = $('#name-input').value.trim();
-  if (name) send({ type: 'change-name', name });
+  if (name) {
+    localStorage.setItem('codenames-name', name);
+    send({ type: 'change-name', name });
+  }
 };
 $('#name-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('#btn-change-name').click();
@@ -375,7 +388,8 @@ function renderPlayerPanel() {
         btn.onclick = () => send({ type: 'pick-team', team: teamId, role: 'operative' });
         actions.appendChild(btn);
       }
-      if (!inThisTeam || you.role !== 'spymaster') {
+      const spyTaken = spy && spy.id !== you.id;
+      if ((!inThisTeam || you.role !== 'spymaster') && !spyTaken) {
         const btn = document.createElement('button');
         btn.textContent = '\u2605 Ведущий';
         btn.onclick = () => send({ type: 'pick-team', team: teamId, role: 'spymaster' });

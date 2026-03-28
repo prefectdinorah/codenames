@@ -58,11 +58,14 @@ function createGame(settings) {
   const shuffledTeams = shuffle([...teams]);
   const firstTeam = shuffledTeams[0];
 
-  const perTeam = Math.floor((totalCards - 1) / (teamCount + 1));
+  // Each subsequent team in turn order gets 1 fewer word
+  // e.g. 3 teams: first=9, second=8, third=7
+  const basePerTeam = Math.floor((totalCards - 1) / (teamCount + 1));
   const distribution = [];
-  for (let i = 0; i < perTeam + 1; i++) distribution.push(firstTeam);
-  for (const t of teams.filter((t) => t !== firstTeam)) {
-    for (let i = 0; i < perTeam; i++) distribution.push(t);
+  for (let i = 0; i < basePerTeam + 1; i++) distribution.push(shuffledTeams[0]);
+  for (let ti = 1; ti < shuffledTeams.length; ti++) {
+    const count = Math.max(1, basePerTeam - (ti - 1));
+    for (let i = 0; i < count; i++) distribution.push(shuffledTeams[ti]);
   }
   distribution.push('assassin');
   while (distribution.length < totalCards) distribution.push('neutral');
@@ -411,6 +414,13 @@ wss.on('connection', (ws) => {
       if (team && !currentRoom.game.teams.includes(team)) return;
       if (role && role !== 'spymaster' && role !== 'operative') return;
 
+      // Block if spymaster slot is already taken by another player
+      if (team && role === 'spymaster') {
+        for (const [id, p] of currentRoom.players) {
+          if (id !== playerId && p.team === team && p.role === 'spymaster') return;
+        }
+      }
+
       // Clear vote if switching
       delete currentRoom.game.playerVotes[playerId];
       checkVoteConsensus(currentRoom);
@@ -442,6 +452,7 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'toggle-pause') {
       if (!currentRoom || currentRoom.game.winner) return;
+      if (playerId !== currentRoom.hostId) return;
       const game = currentRoom.game;
       game.paused = !game.paused;
       if (game.paused) {
