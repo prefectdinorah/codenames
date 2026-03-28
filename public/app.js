@@ -241,7 +241,10 @@ function renderBoard(canVote, isSpymaster) {
       return;
     }
 
-    if (isSpymaster && card.type) {
+    // Game over — show all cards (unrevealed ones get semi-transparent fill)
+    if (state.winner && card.type) {
+      el.classList.add(`spy-${card.type}`);
+    } else if (isSpymaster && card.type) {
       el.classList.add(`spy-${card.type}`);
     } else {
       el.classList.add('unrevealed');
@@ -470,11 +473,14 @@ function renderPauseOverlay() {
 
 function renderWinnerOverlay() {
   const overlay = $('#winner-overlay');
+  const screen = $('#game-screen');
   if (!state.winner) {
     overlay.classList.add('hidden');
+    screen.style.paddingTop = '';
     return;
   }
   overlay.classList.remove('hidden');
+  screen.style.paddingTop = '90px';
   const text = $('#winner-text');
   const info = state.teamInfo[state.winner];
 

@@ -314,7 +314,7 @@ function getPlayerState(room, playerId) {
   const cards = room.game.cards.map((c) => ({
     word: c.word,
     revealed: c.revealed,
-    type: c.revealed || isSpymaster ? c.type : null,
+    type: c.revealed || isSpymaster || room.game.winner ? c.type : null,
   }));
 
   const players = [];
