@@ -63,6 +63,15 @@ body {
 .divider { color: #666; font-size: 14px; }
 .error { color: #e74c3c; font-size: 14px; }
 
+.version {
+  position: fixed;
+  bottom: 12px;
+  right: 16px;
+  font-size: 11px;
+  color: #444;
+  letter-spacing: 1px;
+}
+
 #room-code-input {
   text-transform: uppercase;
   letter-spacing: 4px;
