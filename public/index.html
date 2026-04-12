@@ -13,12 +13,12 @@
     <div class="join-box">
       <h1 id="join-title">Игры</h1>
       <input type="text" id="player-name" placeholder="Твоё имя" maxlength="20" autocomplete="off">
-      <div class="mode-selector">
-        <button class="mode-card active" data-mode="codenames">Codenames</button>
-        <button class="mode-card" data-mode="alias">Alias</button>
-        <button class="mode-card" data-mode="spyfall">Шпион</button>
-        <button class="mode-card" data-mode="crocodile">Крокодил</button>
-      </div>
+      <select id="mode-select" class="mode-select">
+        <option value="codenames">Codenames</option>
+        <option value="alias">Alias</option>
+        <option value="spyfall">Один Шпион</option>
+        <option value="crocodile">Крокодил</option>
+      </select>
       <button id="btn-create">Создать комнату</button>
       <div class="divider">или</div>
       <input type="text" id="room-code-input" placeholder="Код комнаты" maxlength="4" autocomplete="off">

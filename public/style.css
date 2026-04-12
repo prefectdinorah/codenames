@@ -62,28 +62,18 @@ body {
 #btn-join { background: #3498db; color: #fff; }
 .divider { color: #666; font-size: 14px; }
 .error { color: #e74c3c; font-size: 14px; }
-.mode-selector {
-  display: flex;
-  gap: 8px;
-}
-.mode-card {
-  flex: 1;
-  padding: 12px 8px;
+.mode-select {
+  padding: 12px 16px;
   border: 2px solid #333;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #16213e;
-  color: #888;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
-}
-.mode-card:hover { border-color: #555; }
-.mode-card.active {
-  border-color: #3498db;
   color: #eee;
-  background: rgba(52, 152, 219, 0.1);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
 }
+.mode-select:focus { outline: none; border-color: #3498db; }
 
 .game-mode-badge {
   font-size: 11px;

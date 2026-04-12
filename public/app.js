@@ -45,13 +45,9 @@ function send(msg) {
 }
 
 // ===== Mode selector =====
-$$('.mode-card').forEach((card) => {
-  card.onclick = () => {
-    $$('.mode-card').forEach((c) => c.classList.remove('active'));
-    card.classList.add('active');
-    selectedMode = card.dataset.mode;
-  };
-});
+$('#mode-select').onchange = () => {
+  selectedMode = $('#mode-select').value;
+};
 
 // ===== Join =====
 $('#btn-create').onclick = () => {
