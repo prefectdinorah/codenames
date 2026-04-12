@@ -96,13 +96,18 @@ $('#btn-apply-settings').onclick = () => {
       gridCols: $('#s-cols').value,
       timerDuration: $('#s-timer').value,
     });
-  } else {
+  } else if (state.gameMode === 'alias') {
     send({
       type: 'update-settings',
       teamCount: $('#sa-teams').value,
       timerDuration: $('#sa-timer').value,
       targetScore: $('#sa-target').value,
       difficulty: $('#sa-difficulty').value,
+    });
+  } else if (state.gameMode === 'spyfall') {
+    send({
+      type: 'update-settings',
+      roundDuration: $('#ss-duration').value,
     });
   }
   $('#settings-dropdown').classList.add('hidden');
@@ -150,8 +155,10 @@ function render() {
   // Toggle game areas
   $('#codenames-area').classList.toggle('hidden', gm !== 'codenames');
   $('#alias-area').classList.toggle('hidden', gm !== 'alias');
+  $('#spyfall-area').classList.toggle('hidden', gm !== 'spyfall');
   $('#settings-codenames').classList.toggle('hidden', gm !== 'codenames');
   $('#settings-alias').classList.toggle('hidden', gm !== 'alias');
+  $('#settings-spyfall').classList.toggle('hidden', gm !== 'spyfall');
   $('#clue-display').classList.toggle('hidden', gm !== 'codenames');
 
   // Settings values
@@ -161,11 +168,13 @@ function render() {
       $('#s-rows').value = state.settings.gridRows;
       $('#s-cols').value = state.settings.gridCols;
       $('#s-timer').value = state.settings.timerDuration;
-    } else {
+    } else if (gm === 'alias') {
       $('#sa-teams').value = state.settings.teamCount;
       $('#sa-timer').value = state.settings.timerDuration;
       $('#sa-target').value = state.settings.targetScore;
       $('#sa-difficulty').value = state.settings.difficulty;
+    } else if (gm === 'spyfall') {
+      $('#ss-duration').value = state.settings.roundDuration;
     }
   }
 
@@ -177,9 +186,12 @@ function render() {
     renderBoard();
     renderClueHistory();
     renderCodenamesControls();
-  } else {
+  } else if (gm === 'alias') {
     renderAliasTurnInfo();
     renderAliasArea();
+  } else if (gm === 'spyfall') {
+    renderSpyfallTurnInfo();
+    renderSpyfallArea();
   }
 
   renderPlayerPanel();
@@ -192,6 +204,17 @@ function renderScores() {
   const bar = $('#scores-bar');
   bar.innerHTML = '';
   const gm = state.gameMode;
+
+  if (gm === 'spyfall') {
+    const inGame = state.players.filter((p) => p.team === 'player').length;
+    const badge = document.createElement('div');
+    badge.className = 'score-badge';
+    badge.style.background = 'rgba(155,89,182,0.2)';
+    badge.style.color = '#9b59b6';
+    badge.innerHTML = `<span class="s-label">Игроки</span>${inGame}`;
+    bar.appendChild(badge);
+    return;
+  }
 
   for (const teamId of state.teams) {
     const info = state.teamInfo[teamId];
@@ -485,6 +508,218 @@ function renderAliasArea() {
 }
 
 // ============================================================
+// SPYFALL
+// ============================================================
+
+function renderSpyfallTurnInfo() {
+  const turnEl = $('#turn-indicator');
+  if (state.sfPhase === 'finished') { turnEl.textContent = ''; return; }
+  if (state.sfPhase === 'lobby') { turnEl.textContent = 'Ожидание игроков...'; turnEl.style.color = '#888'; return; }
+  if (state.sfPhase === 'voting') { turnEl.textContent = 'Голосование'; turnEl.style.color = '#e74c3c'; return; }
+  if (state.sfPhase === 'playing') {
+    const asker = state.players.find((p) => p.id === state.currentAsker);
+    turnEl.textContent = `Спрашивает: ${asker ? asker.name : '???'}`;
+    turnEl.style.color = '#9b59b6';
+  }
+}
+
+function renderSpyfallArea() {
+  const area = $('#spyfall-area');
+  area.innerHTML = '';
+  const you = state.you;
+  const isHost = you && you.id === state.hostId;
+
+  if (state.sfPhase === 'lobby') {
+    const inGame = state.players.filter((p) => p.team === 'player').length;
+    const msg = document.createElement('div');
+    msg.className = 'sf-lobby-msg';
+    msg.textContent = inGame < 3
+      ? `Нужно минимум 3 игрока (сейчас ${inGame})`
+      : `Готово к старту! Игроков: ${inGame}`;
+    area.appendChild(msg);
+
+    if (isHost && inGame >= 3) {
+      const btn = document.createElement('button');
+      btn.className = 'sf-btn-start';
+      btn.textContent = 'Начать игру';
+      btn.onclick = () => send({ type: 'start-game' });
+      area.appendChild(btn);
+    }
+    return;
+  }
+
+  if (state.sfPhase === 'playing' || state.sfPhase === 'voting') {
+    // Role card
+    if (you && you.team === 'player' && state.yourIsSpy !== undefined) {
+      const card = document.createElement('div');
+      card.className = 'spyfall-role-card ' + (state.yourIsSpy ? 'sf-spy' : 'sf-player');
+      if (state.yourIsSpy) {
+        card.innerHTML = `<div class="sf-location">Вы шпион</div><div class="sf-role">Узнайте локацию по вопросам!</div>`;
+      } else {
+        card.innerHTML = `<div class="sf-location">${esc(state.location || '???')}</div><div class="sf-role">${esc(state.yourRole || '')}</div>`;
+      }
+      area.appendChild(card);
+    }
+
+    if (state.sfPhase === 'voting' && state.accusation) {
+      renderSpyfallVoting(area);
+      return;
+    }
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'sf-actions';
+
+    if (you && you.id === state.currentAsker) {
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'sf-btn-next';
+      nextBtn.textContent = 'Передать ход';
+      nextBtn.onclick = () => send({ type: 'next-turn' });
+      actions.appendChild(nextBtn);
+    }
+
+    if (you && you.team === 'player') {
+      const accuseBtn = document.createElement('button');
+      accuseBtn.className = 'sf-btn-accuse';
+      accuseBtn.textContent = 'Обвинить';
+      accuseBtn.onclick = () => toggleAccuseList();
+      actions.appendChild(accuseBtn);
+    }
+
+    if (you && state.yourIsSpy) {
+      const guessBtn = document.createElement('button');
+      guessBtn.className = 'sf-btn-guess';
+      guessBtn.textContent = 'Угадать локацию';
+      guessBtn.onclick = () => toggleLocationGrid();
+      actions.appendChild(guessBtn);
+    }
+
+    area.appendChild(actions);
+
+    // Accuse player list (hidden by default)
+    const accuseList = document.createElement('div');
+    accuseList.id = 'sf-accuse-list';
+    accuseList.className = 'sf-accuse-list hidden';
+    const gamePlayers = state.players.filter((p) => p.team === 'player' && p.id !== you?.id);
+    for (const p of gamePlayers) {
+      const btn = document.createElement('button');
+      btn.textContent = p.name;
+      btn.onclick = () => send({ type: 'accuse', accusedId: p.id });
+      accuseList.appendChild(btn);
+    }
+    area.appendChild(accuseList);
+
+    // Location grid for spy guess (hidden by default)
+    if (state.yourIsSpy && state.allLocations) {
+      const grid = document.createElement('div');
+      grid.id = 'sf-location-grid';
+      grid.className = 'sf-location-grid hidden';
+      for (const loc of state.allLocations) {
+        const btn = document.createElement('button');
+        btn.textContent = loc;
+        btn.onclick = () => { if (confirm(`Угадать: ${loc}?`)) send({ type: 'spy-guess', locationName: loc }); };
+        grid.appendChild(btn);
+      }
+      area.appendChild(grid);
+    }
+    return;
+  }
+
+  if (state.sfPhase === 'finished') {
+    renderSpyfallResults(area);
+  }
+}
+
+function renderSpyfallVoting(area) {
+  const acc = state.accusation;
+  const accuser = state.players.find((p) => p.id === acc.accuserId);
+  const accused = state.players.find((p) => p.id === acc.accusedId);
+  const you = state.you;
+
+  const panel = document.createElement('div');
+  panel.className = 'sf-vote-panel';
+  const q = document.createElement('div');
+  q.className = 'sf-vote-question';
+  q.innerHTML = `<strong>${esc(accuser?.name || '???')}</strong> обвиняет <strong>${esc(accused?.name || '???')}</strong> в шпионаже!`;
+  panel.appendChild(q);
+
+  const hasVoted = you && acc.votes[you.id] !== undefined;
+  if (you && you.team === 'player' && !hasVoted) {
+    const btns = document.createElement('div');
+    btns.className = 'sf-vote-buttons';
+    const yesBtn = document.createElement('button');
+    yesBtn.className = 'sf-vote-yes';
+    yesBtn.textContent = 'За';
+    yesBtn.onclick = () => send({ type: 'vote-accuse', vote: true });
+    const noBtn = document.createElement('button');
+    noBtn.className = 'sf-vote-no';
+    noBtn.textContent = 'Против';
+    noBtn.onclick = () => send({ type: 'vote-accuse', vote: false });
+    btns.appendChild(yesBtn);
+    btns.appendChild(noBtn);
+    panel.appendChild(btns);
+  }
+
+  const voted = Object.keys(acc.votes).length;
+  const status = document.createElement('div');
+  status.className = 'sf-vote-status';
+  status.textContent = `Проголосовали: ${voted} / ${acc.totalPlayers}`;
+  panel.appendChild(status);
+
+  // Cancel button
+  const isHost = you && you.id === state.hostId;
+  if (you && (you.id === acc.accuserId || isHost)) {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'sf-btn-accuse';
+    cancelBtn.style.marginTop = '10px';
+    cancelBtn.textContent = 'Отменить обвинение';
+    cancelBtn.onclick = () => send({ type: 'cancel-accusation' });
+    panel.appendChild(cancelBtn);
+  }
+
+  area.appendChild(panel);
+}
+
+function renderSpyfallResults(area) {
+  if (!state.allAssignments) return;
+
+  const section = document.createElement('div');
+  section.className = 'sf-result-section';
+  const h4 = document.createElement('h4');
+  h4.textContent = `Локация: ${state.location || '???'}`;
+  section.appendChild(h4);
+
+  for (const [id, info] of Object.entries(state.allAssignments)) {
+    const p = state.players.find((pl) => pl.id === id);
+    const entry = document.createElement('div');
+    entry.className = 'sf-result-entry';
+    if (info.isSpy) {
+      entry.classList.add('sf-result-spy');
+      entry.innerHTML = `<span>${esc(p?.name || id)} (ШПИОН)</span>`;
+    } else {
+      entry.innerHTML = `<span>${esc(p?.name || id)}</span><span style="color:#888">${esc(info.role)}</span>`;
+    }
+    section.appendChild(entry);
+  }
+
+  area.appendChild(section);
+}
+
+function toggleAccuseList() {
+  const el = document.getElementById('sf-accuse-list');
+  const grid = document.getElementById('sf-location-grid');
+  if (el) el.classList.toggle('hidden');
+  if (grid) grid.classList.add('hidden');
+}
+
+function toggleLocationGrid() {
+  const grid = document.getElementById('sf-location-grid');
+  const el = document.getElementById('sf-accuse-list');
+  if (grid) grid.classList.toggle('hidden');
+  if (el) el.classList.add('hidden');
+}
+
+// ============================================================
 // SHARED: Player panel
 // ============================================================
 
@@ -493,7 +728,62 @@ function renderPlayerPanel() {
   panel.innerHTML = '';
   const you = state.you;
   const gm = state.gameMode;
-  const canSwitch = you && (gm === 'alias' || !state.paused);
+  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || !state.paused);
+
+  if (gm === 'spyfall') {
+    // Single player list block
+    const inGame = state.players.filter((p) => p.team === 'player');
+    const block = document.createElement('div');
+    block.className = 'player-team-block';
+    block.style.background = 'rgba(155,89,182,0.08)';
+    block.style.borderLeft = '3px solid #9b59b6';
+    const h4 = document.createElement('h4');
+    h4.textContent = 'Игроки';
+    h4.style.color = '#9b59b6';
+    block.appendChild(h4);
+    const opList = document.createElement('div');
+    opList.className = 'operative-list';
+    for (const p of inGame) {
+      const entry = document.createElement('div');
+      entry.className = 'operative-entry';
+      entry.textContent = p.name;
+      if (p.id === state.currentAsker && state.sfPhase === 'playing') {
+        entry.style.fontWeight = '700';
+        entry.textContent = '\u2605 ' + p.name;
+      }
+      opList.appendChild(entry);
+    }
+    block.appendChild(opList);
+    if (you && you.team !== 'player') {
+      const btn = document.createElement('button');
+      btn.className = 'btn-spectate';
+      btn.textContent = 'Вступить в игру';
+      btn.onclick = () => send({ type: 'pick-team', team: 'player' });
+      block.appendChild(btn);
+    }
+    panel.appendChild(block);
+
+    // Spectators
+    const spectators = state.players.filter((p) => !p.team);
+    const specBlock = document.createElement('div');
+    specBlock.className = 'spectators-block';
+    specBlock.innerHTML = `<h4>\uD83D\uDC41 Зрители (${spectators.length})</h4>`;
+    for (const p of spectators) {
+      const entry = document.createElement('div');
+      entry.className = 'spectator-entry';
+      entry.textContent = p.name;
+      specBlock.appendChild(entry);
+    }
+    if (you && you.team === 'player') {
+      const btn = document.createElement('button');
+      btn.className = 'btn-spectate';
+      btn.textContent = 'Стать зрителем';
+      btn.onclick = () => send({ type: 'pick-team', team: null });
+      specBlock.appendChild(btn);
+    }
+    panel.appendChild(specBlock);
+    return;
+  }
 
   for (const teamId of state.teams) {
     const info = state.teamInfo[teamId];
@@ -679,7 +969,9 @@ function renderPauseOverlay() {
 function renderWinnerOverlay() {
   const overlay = $('#winner-overlay');
   const screen = $('#game-screen');
-  const hasWinner = state.gameMode === 'alias' ? state.phase === 'finished' : !!state.winner;
+  const hasWinner = state.gameMode === 'alias' ? state.phase === 'finished'
+    : state.gameMode === 'spyfall' ? state.sfPhase === 'finished'
+    : !!state.winner;
 
   if (!hasWinner) {
     overlay.classList.add('hidden');
@@ -690,8 +982,23 @@ function renderWinnerOverlay() {
   screen.style.paddingTop = '90px';
 
   const text = $('#winner-text');
-  const winner = state.winner || state.teams[state.currentTeamIndex];
-  const info = state.teamInfo[winner];
+
+  if (state.gameMode === 'spyfall') {
+    const reasons = {
+      voted: 'Шпион раскрыт голосованием!',
+      wrongAccusation: 'Обвинили невиновного — шпион победил!',
+      guessed: 'Шпион угадал локацию!',
+      wrongGuess: 'Шпион ошибся — игроки победили!',
+      timer: 'Время вышло — игроки победили!',
+    };
+    const isSpyWin = state.winner === 'spy';
+    text.textContent = reasons[state.winReason] || (isSpyWin ? 'Шпион победил!' : 'Игроки победили!');
+    text.style.color = isSpyWin ? '#e74c3c' : '#2ecc71';
+    return;
+  }
+
+  const winner = state.winner || (state.teams && state.teams[state.currentTeamIndex]);
+  const info = winner ? state.teamInfo[winner] : null;
 
   if (state.assassinLoser && info) {
     text.textContent = `${info.name} проиграли! (убийца)`;

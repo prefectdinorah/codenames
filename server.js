@@ -4,6 +4,7 @@ const { WebSocketServer } = require('ws');
 const path = require('path');
 const codenamesWords = require('./words');
 const aliasWords = require('./alias-words');
+const spyfallLocations = require('./spyfall-locations');
 
 const app = express();
 const server = http.createServer(app);
@@ -152,6 +153,86 @@ function aliasGetExplainer(room) {
 }
 
 // ============================================================
+// ============================================================
+// SPYFALL GAME LOGIC
+// ============================================================
+
+function createSpyfallGame(settings) {
+  return {
+    phase: 'lobby',
+    location: null,
+    assignments: {},
+    spyId: null,
+    roundDuration: settings.roundDuration || 480,
+    timerEnd: null,
+    timerRemaining: null,
+    paused: true,
+    accusation: null,
+    winner: null,
+    winReason: null,
+    allLocations: shuffle(spyfallLocations.map((l) => l.name)),
+    turnOrder: [],
+    turnIndex: 0,
+    currentAsker: null,
+    teams: [],
+    scores: {},
+  };
+}
+
+function startSpyfallRound(room) {
+  const game = room.game;
+  const playerIds = [];
+  for (const [id, p] of room.players) {
+    if (p.team === 'player') playerIds.push(id);
+  }
+  if (playerIds.length < 3) return false;
+
+  const location = spyfallLocations[Math.floor(Math.random() * spyfallLocations.length)];
+  const shuffledPlayers = shuffle(playerIds);
+  const spyId = shuffledPlayers[0];
+  const roles = shuffle([...location.roles]);
+
+  const assignments = {};
+  assignments[spyId] = { role: null, isSpy: true };
+  for (let i = 1; i < shuffledPlayers.length; i++) {
+    assignments[shuffledPlayers[i]] = {
+      role: roles[(i - 1) % roles.length],
+      isSpy: false,
+    };
+  }
+
+  game.location = location;
+  game.assignments = assignments;
+  game.spyId = spyId;
+  game.phase = 'playing';
+  game.winner = null;
+  game.winReason = null;
+  game.accusation = null;
+  game.turnOrder = shuffle(playerIds);
+  game.turnIndex = 0;
+  game.currentAsker = game.turnOrder[0];
+  game.allLocations = shuffle(spyfallLocations.map((l) => l.name));
+
+  startSpyfallTimer(room);
+  return true;
+}
+
+function startSpyfallTimer(room) {
+  clearTimer(room);
+  const duration = room.game.roundDuration;
+  room.game.timerEnd = Date.now() + duration * 1000;
+  room.game.timerRemaining = duration;
+  room.timerTimeout = setTimeout(() => {
+    if (room.game.paused || room.game.phase !== 'playing') return;
+    room.game.phase = 'finished';
+    room.game.winner = 'players';
+    room.game.winReason = 'timer';
+    clearTimer(room);
+    broadcastRoom(room);
+  }, duration * 1000);
+}
+
+// ============================================================
 // SHARED: Room management
 // ============================================================
 
@@ -162,6 +243,9 @@ function createRoom(hostId, gameMode) {
   if (gameMode === 'alias') {
     settings = { teamCount: 2, timerDuration: 60, targetScore: 30, difficulty: 'normal' };
     game = createAliasGame(settings);
+  } else if (gameMode === 'spyfall') {
+    settings = { roundDuration: 480 };
+    game = createSpyfallGame(settings);
   } else {
     settings = { teamCount: 2, gridRows: 5, gridCols: 5, timerDuration: 0 };
     game = createCodenamesGame(settings);
@@ -229,7 +313,16 @@ function resumeTimerFor(room) {
   if (!remaining || remaining <= 0) return;
   room.game.timerEnd = Date.now() + remaining * 1000;
 
-  if (room.gameMode === 'alias') {
+  if (room.gameMode === 'spyfall') {
+    room.timerTimeout = setTimeout(() => {
+      if (room.game.paused || room.game.phase !== 'playing') return;
+      room.game.phase = 'finished';
+      room.game.winner = 'players';
+      room.game.winReason = 'timer';
+      clearTimer(room);
+      broadcastRoom(room);
+    }, remaining * 1000);
+  } else if (room.gameMode === 'alias') {
     room.timerTimeout = setTimeout(() => {
       if (room.game.paused) return;
       room.game.phase = 'review';
@@ -384,6 +477,33 @@ function getCodenamesState(room, playerId) {
   };
 }
 
+function getSpyfallState(room, playerId) {
+  const game = room.game;
+  const myAssignment = game.assignments[playerId] || null;
+  const isFinished = game.phase === 'finished';
+
+  return {
+    sfPhase: game.phase,
+    roundDuration: game.roundDuration,
+    yourRole: myAssignment ? myAssignment.role : null,
+    yourIsSpy: myAssignment ? myAssignment.isSpy : false,
+    location: (myAssignment && !myAssignment.isSpy) || isFinished ? game.location?.name : null,
+    allAssignments: isFinished ? game.assignments : null,
+    spyId: isFinished ? game.spyId : null,
+    accusation: game.accusation ? {
+      accuserId: game.accusation.accuserId,
+      accusedId: game.accusation.accusedId,
+      votes: game.accusation.votes,
+      totalPlayers: game.turnOrder.length,
+    } : null,
+    currentAsker: game.currentAsker,
+    turnOrder: game.turnOrder,
+    allLocations: game.allLocations,
+    winner: game.winner,
+    winReason: game.winReason,
+  };
+}
+
 function getAliasState(room, playerId) {
   const game = room.game;
   const isExplainer = playerId === game.explainerId;
@@ -425,6 +545,8 @@ function getPlayerState(room, playerId) {
 
   if (room.gameMode === 'alias') {
     Object.assign(base, getAliasState(room, playerId));
+  } else if (room.gameMode === 'spyfall') {
+    Object.assign(base, getSpyfallState(room, playerId));
   } else {
     Object.assign(base, getCodenamesState(room, playerId));
   }
@@ -484,11 +606,15 @@ wss.on('connection', (ws) => {
       const player = currentRoom.players.get(playerId);
       if (!player) return;
       const goingSpectator = !msg.team;
-      if (currentRoom.game.paused && !goingSpectator && currentRoom.gameMode !== 'alias') return;
+      if (currentRoom.game.paused && !goingSpectator && currentRoom.gameMode === 'codenames') return;
 
       const team = msg.team || null;
       const role = msg.role || null;
-      if (team && !currentRoom.game.teams.includes(team)) return;
+      if (currentRoom.gameMode === 'spyfall') {
+        if (team && team !== 'player') return;
+      } else {
+        if (team && !currentRoom.game.teams.includes(team)) return;
+      }
       if (currentRoom.gameMode === 'codenames') {
         if (role && role !== 'spymaster' && role !== 'operative') return;
         if (team && role === 'spymaster') {
@@ -526,6 +652,10 @@ wss.on('connection', (ws) => {
 
     if (currentRoom && currentRoom.gameMode === 'alias') {
       handleAliasMsg(currentRoom, playerId, msg);
+    }
+
+    if (currentRoom && currentRoom.gameMode === 'spyfall') {
+      handleSpyfallMsg(currentRoom, playerId, msg);
     }
   });
 
@@ -745,6 +875,113 @@ function handleAliasMsg(room, playerId, msg) {
       const p = room.players.get(shuffled[idx]);
       p.team = teams[teamIdx % teams.length]; p.role = 'player'; idx++; teamIdx++;
     }
+    broadcastRoom(room);
+  }
+}
+
+// ============================================================
+// SPYFALL MESSAGE HANDLER
+// ============================================================
+
+function handleSpyfallMsg(room, playerId, msg) {
+  const game = room.game;
+
+  if (msg.type === 'update-settings') {
+    if (playerId !== room.hostId) return;
+    const roundDuration = Math.max(60, Math.min(900, parseInt(msg.roundDuration, 10) || 480));
+    room.settings = { roundDuration };
+    clearTimer(room);
+    room.game = createSpyfallGame(room.settings);
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'start-game') {
+    if (playerId !== room.hostId) return;
+    if (game.phase !== 'lobby') return;
+    if (!startSpyfallRound(room)) return;
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'next-turn') {
+    if (game.phase !== 'playing') return;
+    if (playerId !== game.currentAsker) return;
+    game.turnIndex = (game.turnIndex + 1) % game.turnOrder.length;
+    game.currentAsker = game.turnOrder[game.turnIndex];
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'accuse') {
+    if (game.phase !== 'playing') return;
+    const accusedId = msg.accusedId;
+    if (!game.assignments[accusedId]) return;
+    if (accusedId === playerId) return;
+    pauseTimer(room);
+    game.phase = 'voting';
+    game.accusation = { accuserId: playerId, accusedId, votes: {} };
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'vote-accuse') {
+    if (game.phase !== 'voting' || !game.accusation) return;
+    if (!game.assignments[playerId]) return;
+    game.accusation.votes[playerId] = !!msg.vote;
+
+    // Check if all players voted
+    const voters = game.turnOrder.filter((id) => room.players.has(id));
+    const voteCount = Object.keys(game.accusation.votes).length;
+    if (voteCount >= voters.length) {
+      const yesVotes = Object.values(game.accusation.votes).filter((v) => v).length;
+      if (yesVotes > voters.length / 2) {
+        // Majority voted yes
+        game.phase = 'finished';
+        if (game.accusation.accusedId === game.spyId) {
+          game.winner = 'players';
+          game.winReason = 'voted';
+        } else {
+          game.winner = 'spy';
+          game.winReason = 'wrongAccusation';
+        }
+        clearTimer(room);
+      } else {
+        // Not enough votes — back to playing
+        game.phase = 'playing';
+        game.accusation = null;
+        resumeTimerFor(room);
+      }
+    }
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'cancel-accusation') {
+    if (game.phase !== 'voting' || !game.accusation) return;
+    if (playerId !== game.accusation.accuserId && playerId !== room.hostId) return;
+    game.phase = 'playing';
+    game.accusation = null;
+    resumeTimerFor(room);
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'spy-guess') {
+    if (game.phase !== 'playing') return;
+    if (playerId !== game.spyId) return;
+    const locationName = msg.locationName;
+    game.phase = 'finished';
+    if (locationName === game.location.name) {
+      game.winner = 'spy';
+      game.winReason = 'guessed';
+    } else {
+      game.winner = 'players';
+      game.winReason = 'wrongGuess';
+    }
+    clearTimer(room);
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'new-game') {
+    if (playerId !== room.hostId) return;
+    clearTimer(room);
+    room.game = createSpyfallGame(room.settings);
+    // Keep player assignments (team: 'player')
     broadcastRoom(room);
   }
 }

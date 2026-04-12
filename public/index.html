@@ -16,6 +16,7 @@
       <div class="mode-selector">
         <button class="mode-card active" data-mode="codenames">Codenames</button>
         <button class="mode-card" data-mode="alias">Alias</button>
+        <button class="mode-card" data-mode="spyfall">Шпион</button>
       </div>
       <button id="btn-create">Создать комнату</button>
       <div class="divider">или</div>
@@ -23,7 +24,7 @@
       <button id="btn-join">Присоединиться</button>
       <div id="join-error" class="error"></div>
     </div>
-    <div class="version">v1.4.0</div>
+    <div class="version">v1.5.0</div>
   </div>
 
   <!-- Game screen -->
@@ -71,6 +72,13 @@
               <label>Цель <select id="sa-target"><option value="15">15</option><option value="20">20</option><option value="30" selected>30</option><option value="50">50</option><option value="75">75</option><option value="100">100</option></select></label>
               <label>Сложность <select id="sa-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
             </div>
+            <!-- Spyfall settings -->
+            <div id="settings-spyfall" class="hidden">
+              <label>Раунд <select id="ss-duration">
+                <option value="240">4 мин</option><option value="360">6 мин</option>
+                <option value="480" selected>8 мин</option><option value="600">10 мин</option>
+              </select></label>
+            </div>
             <button id="btn-apply-settings">Применить</button>
           </div>
         </div>
@@ -94,6 +102,9 @@
 
     <!-- Alias area -->
     <div id="alias-area" class="alias-center hidden"></div>
+
+    <!-- Spyfall area -->
+    <div id="spyfall-area" class="spyfall-center hidden"></div>
 
     <!-- Player panel -->
     <div id="player-panel" class="player-panel"></div>
