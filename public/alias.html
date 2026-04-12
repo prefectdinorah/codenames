@@ -3,32 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Codenames</title>
+  <title>Alias</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- Join overlay (shown when not in a room) -->
+  <!-- Join overlay -->
   <div id="join-overlay" class="overlay active">
     <div class="join-box">
-      <h1>Codenames</h1>
+      <h1 style="background: linear-gradient(135deg, #e67e22, #9b59b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Alias</h1>
       <input type="text" id="player-name" placeholder="Твоё имя" maxlength="20" autocomplete="off">
-      <button id="btn-create">Создать комнату</button>
+      <button id="btn-create" style="background:#e67e22;">Создать комнату</button>
       <div class="divider">или</div>
       <input type="text" id="room-code-input" placeholder="Код комнаты" maxlength="4" autocomplete="off">
       <button id="btn-join">Присоединиться</button>
       <div id="join-error" class="error"></div>
       <div class="game-switch">
-        <a href="/alias">Играть в Alias</a>
+        <a href="/">Играть в Codenames</a>
       </div>
     </div>
     <div class="version">v1.3.0</div>
   </div>
 
-  <!-- Game screen (always visible once joined) -->
+  <!-- Game screen -->
   <div id="game-screen" class="game-screen hidden">
 
-    <!-- Top bar -->
     <div class="top-bar">
       <div class="top-left">
         <span class="room-label">Комната:</span>
@@ -45,17 +44,15 @@
       </div>
     </div>
 
-    <!-- Turn / clue / timer bar -->
     <div class="info-bar">
       <div id="turn-indicator" class="turn-indicator"></div>
       <div id="timer-display" class="timer-display hidden"></div>
-      <div id="clue-display" class="clue-display"></div>
       <div class="action-buttons">
         <button id="btn-pause" class="btn-action host-only hidden" title="Пауза">&#9208; Пауза</button>
         <button id="btn-restart" class="btn-action host-only hidden" title="Рестарт">&#8635; Рестарт</button>
-        <button id="btn-shuffle" class="btn-action host-only hidden" title="Перемешать игроков">&#8645; Шафл</button>
+        <button id="btn-shuffle" class="btn-action host-only hidden" title="Перемешать">&#8645; Шафл</button>
         <div id="settings-wrap" class="settings-wrap host-only hidden">
-          <button id="btn-settings" class="btn-action" title="Настройки">&#9881; Настройки</button>
+          <button id="btn-settings" class="btn-action">&#9881; Настройки</button>
           <div id="settings-dropdown" class="settings-dropdown hidden">
             <label>Команды
               <select id="s-teams">
@@ -63,24 +60,24 @@
                 <option value="4">4</option><option value="5">5</option>
               </select>
             </label>
-            <label>Строки
-              <select id="s-rows">
-                <option value="4">4</option><option value="5" selected>5</option>
-                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-              </select>
-            </label>
-            <label>Столбцы
-              <select id="s-cols">
-                <option value="4">4</option><option value="5" selected>5</option>
-                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-              </select>
-            </label>
-            <label>Таймер
+            <label>Таймер (сек)
               <select id="s-timer">
-                <option value="0">Выкл</option>
-                <option value="30">30с</option><option value="60">60с</option>
-                <option value="90">90с</option><option value="120">120с</option>
-                <option value="180">180с</option>
+                <option value="30">30</option><option value="45">45</option>
+                <option value="60" selected>60</option><option value="90">90</option>
+                <option value="120">120</option>
+              </select>
+            </label>
+            <label>Цель (очки)
+              <select id="s-target">
+                <option value="15">15</option><option value="20">20</option>
+                <option value="30" selected>30</option><option value="50">50</option>
+                <option value="75">75</option><option value="100">100</option>
+              </select>
+            </label>
+            <label>Сложность
+              <select id="s-difficulty">
+                <option value="normal">Нормальная</option>
+                <option value="hard">Сложная</option>
               </select>
             </label>
             <button id="btn-apply-settings">Применить</button>
@@ -89,22 +86,10 @@
       </div>
     </div>
 
-    <!-- Main area: clue history + board + clue history -->
-    <div class="game-body">
-      <div id="clue-history-left" class="clue-sidebar"></div>
-      <div class="board-area">
-        <div id="board" class="board"></div>
-        <div id="clue-form" class="clue-form hidden">
-          <input type="text" id="clue-word" placeholder="Подсказка" maxlength="30" autocomplete="off">
-          <input type="number" id="clue-count" placeholder="0" min="0" max="25" value="">
-          <button id="btn-give-clue">Дать подсказку</button>
-        </div>
-        <button id="btn-end-turn" class="btn-end-turn hidden">Завершить ход</button>
-      </div>
-      <div id="clue-history-right" class="clue-sidebar"></div>
-    </div>
+    <!-- Alias game area -->
+    <div id="alias-area" class="alias-center"></div>
 
-    <!-- Player panel: teams + spectators -->
+    <!-- Player panel -->
     <div id="player-panel" class="player-panel"></div>
 
     <!-- Pause overlay -->
@@ -122,6 +107,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="alias.js"></script>
 </body>
 </html>
