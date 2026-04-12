@@ -762,8 +762,15 @@ wss.on('connection', (ws) => {
       if (playerId !== currentRoom.hostId) return;
       const game = currentRoom.game;
       game.paused = !game.paused;
-      if (game.paused) { pauseTimer(currentRoom); }
-      else { resumeTimerFor(currentRoom); }
+      if (game.paused) {
+        pauseTimer(currentRoom);
+      } else {
+        if (game.timerRemaining > 0) {
+          resumeTimerFor(currentRoom);
+        } else if (currentRoom.gameMode === 'codenames' && currentRoom.settings.timerDuration > 0) {
+          startCodenamesTimer(currentRoom);
+        }
+      }
       broadcastRoom(currentRoom);
     }
 
