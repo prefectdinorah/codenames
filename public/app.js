@@ -32,6 +32,8 @@ function connect() {
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'error') { $('#join-error').textContent = msg.message; return; }
+    if (msg.type === 'croc-draw') { crocDrawRemote(msg); return; }
+    if (msg.type === 'croc-clear') { crocClearCanvas(); return; }
     if (msg.type === 'state') { state = msg; render(); }
   };
 
@@ -109,6 +111,14 @@ $('#btn-apply-settings').onclick = () => {
       type: 'update-settings',
       roundDuration: $('#ss-duration').value,
     });
+  } else if (state.gameMode === 'crocodile') {
+    send({
+      type: 'update-settings',
+      teamCount: $('#sc-teams').value,
+      timerDuration: $('#sc-timer').value,
+      targetScore: $('#sc-target').value,
+      difficulty: $('#sc-difficulty').value,
+    });
   }
   $('#settings-dropdown').classList.add('hidden');
 };
@@ -156,9 +166,11 @@ function render() {
   $('#codenames-area').classList.toggle('hidden', gm !== 'codenames');
   $('#alias-area').classList.toggle('hidden', gm !== 'alias');
   $('#spyfall-area').classList.toggle('hidden', gm !== 'spyfall');
+  $('#crocodile-area').classList.toggle('hidden', gm !== 'crocodile');
   $('#settings-codenames').classList.toggle('hidden', gm !== 'codenames');
   $('#settings-alias').classList.toggle('hidden', gm !== 'alias');
   $('#settings-spyfall').classList.toggle('hidden', gm !== 'spyfall');
+  $('#settings-crocodile').classList.toggle('hidden', gm !== 'crocodile');
   $('#clue-display').classList.toggle('hidden', gm !== 'codenames');
 
   // Settings values
@@ -175,6 +187,11 @@ function render() {
       $('#sa-difficulty').value = state.settings.difficulty;
     } else if (gm === 'spyfall') {
       $('#ss-duration').value = state.settings.roundDuration;
+    } else if (gm === 'crocodile') {
+      $('#sc-teams').value = state.settings.teamCount;
+      $('#sc-timer').value = state.settings.timerDuration;
+      $('#sc-target').value = state.settings.targetScore;
+      $('#sc-difficulty').value = state.settings.difficulty;
     }
   }
 
@@ -192,6 +209,9 @@ function render() {
   } else if (gm === 'spyfall') {
     renderSpyfallTurnInfo();
     renderSpyfallArea();
+  } else if (gm === 'crocodile') {
+    renderCrocodileTurnInfo();
+    renderCrocodileArea();
   }
 
   renderPlayerPanel();
@@ -204,6 +224,21 @@ function renderScores() {
   const bar = $('#scores-bar');
   bar.innerHTML = '';
   const gm = state.gameMode;
+
+  if (gm === 'crocodile') {
+    for (const teamId of state.teams) {
+      const info = state.teamInfo[teamId];
+      const badge = document.createElement('div');
+      badge.className = 'score-badge';
+      badge.style.background = hexToRgba(info.color, 0.2);
+      badge.style.color = info.color;
+      const isActive = teamId === state.teams[state.currentTeamIndex] && state.crocPhase !== 'finished';
+      if (isActive) badge.style.outline = `2px solid ${info.color}`;
+      badge.innerHTML = `<span class="s-label">${esc(info.name)}</span>${state.scores[teamId]} / ${state.targetScore}`;
+      bar.appendChild(badge);
+    }
+    return;
+  }
 
   if (gm === 'spyfall') {
     const inGame = state.players.filter((p) => p.team === 'player').length;
@@ -720,6 +755,281 @@ function toggleLocationGrid() {
 }
 
 // ============================================================
+// CROCODILE
+// ============================================================
+
+const CROC_COLORS = ['#000000','#e74c3c','#e67e22','#f1c40f','#2ecc71','#3498db','#9b59b6','#ecf0f1'];
+let crocCanvas = null;
+let crocCtx = null;
+let crocDrawing = false;
+let crocPoints = [];
+let crocColor = '#000000';
+let crocSize = 4;
+let crocTool = 'pen';
+let crocSendInterval = null;
+
+function crocSetupCanvas(canvas, isDrawer) {
+  crocCanvas = canvas;
+  crocCtx = canvas.getContext('2d');
+  // Set canvas resolution
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * 2;
+  canvas.height = rect.height * 2;
+  crocCtx.scale(2, 2);
+  crocCtx.lineCap = 'round';
+  crocCtx.lineJoin = 'round';
+
+  if (!isDrawer) { canvas.classList.add('readonly'); return; }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    crocDrawing = true;
+    crocPoints = [crocGetPos(e)];
+    crocCtx.beginPath();
+    crocCtx.moveTo(crocPoints[0].x * rect.width, crocPoints[0].y * rect.height);
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!crocDrawing) return;
+    e.preventDefault();
+    const pos = crocGetPos(e);
+    crocPoints.push(pos);
+    const prevPos = crocPoints[crocPoints.length - 2];
+    crocCtx.strokeStyle = crocTool === 'eraser' ? '#ffffff' : crocColor;
+    crocCtx.lineWidth = crocTool === 'eraser' ? crocSize * 3 : crocSize;
+    crocCtx.beginPath();
+    crocCtx.moveTo(prevPos.x * rect.width, prevPos.y * rect.height);
+    crocCtx.lineTo(pos.x * rect.width, pos.y * rect.height);
+    crocCtx.stroke();
+  });
+
+  const endDraw = () => {
+    if (!crocDrawing) return;
+    crocDrawing = false;
+    if (crocPoints.length > 0) {
+      send({ type: 'croc-draw', points: crocPoints, color: crocColor, size: crocSize, tool: crocTool });
+      crocPoints = [];
+    }
+  };
+  canvas.addEventListener('pointerup', endDraw);
+  canvas.addEventListener('pointerleave', endDraw);
+  canvas.addEventListener('pointercancel', endDraw);
+}
+
+function crocGetPos(e) {
+  const rect = crocCanvas.getBoundingClientRect();
+  return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+}
+
+function crocDrawRemote(msg) {
+  if (!crocCanvas || !crocCtx) return;
+  const rect = crocCanvas.getBoundingClientRect();
+  crocCtx.strokeStyle = msg.tool === 'eraser' ? '#ffffff' : msg.color;
+  crocCtx.lineWidth = msg.tool === 'eraser' ? msg.size * 3 : msg.size;
+  crocCtx.lineCap = 'round';
+  crocCtx.lineJoin = 'round';
+  if (msg.points.length < 2) return;
+  crocCtx.beginPath();
+  crocCtx.moveTo(msg.points[0].x * rect.width, msg.points[0].y * rect.height);
+  for (let i = 1; i < msg.points.length; i++) {
+    crocCtx.lineTo(msg.points[i].x * rect.width, msg.points[i].y * rect.height);
+  }
+  crocCtx.stroke();
+}
+
+function crocClearCanvas() {
+  if (!crocCanvas || !crocCtx) return;
+  const rect = crocCanvas.getBoundingClientRect();
+  crocCtx.clearRect(0, 0, rect.width, rect.height);
+}
+
+function renderCrocodileTurnInfo() {
+  const turnEl = $('#turn-indicator');
+  if (state.crocPhase === 'finished') { turnEl.textContent = ''; return; }
+  if (state.crocPhase === 'waiting') {
+    const teamId = state.teams[state.currentTeamIndex];
+    const info = state.teamInfo[teamId];
+    turnEl.textContent = `${info.name} — подготовка`;
+    turnEl.style.color = info.color;
+    return;
+  }
+  if (state.crocPhase === 'drawing') {
+    const teamId = state.teams[state.currentTeamIndex];
+    const info = state.teamInfo[teamId];
+    const drawer = state.players.find((p) => p.id === state.drawerId);
+    turnEl.textContent = `${info.name} — рисует: ${drawer ? drawer.name : '???'}`;
+    turnEl.style.color = info.color;
+  }
+}
+
+let prevCrocPhase = null;
+
+function renderCrocodileArea() {
+  const area = $('#crocodile-area');
+  const you = state.you;
+  const isDrawer = you && you.id === state.drawerId;
+
+  // Only rebuild DOM when phase changes to avoid killing canvas
+  const phaseKey = state.crocPhase + ':' + state.drawerId;
+  if (prevCrocPhase !== phaseKey) {
+    prevCrocPhase = phaseKey;
+    area.innerHTML = '';
+    crocCanvas = null;
+    crocCtx = null;
+
+    if (state.crocPhase === 'waiting') {
+      const card = document.createElement('div');
+      card.className = 'croc-waiting-card';
+      card.textContent = 'Нажмите "Старт" чтобы начать ход';
+      area.appendChild(card);
+      const btn = document.createElement('button');
+      btn.className = 'alias-btn alias-btn-start';
+      btn.textContent = 'Старт';
+      btn.onclick = () => send({ type: 'start-turn' });
+      area.appendChild(btn);
+      return;
+    }
+
+    if (state.crocPhase === 'drawing') {
+      // Word (drawer only)
+      if (isDrawer && state.currentWord) {
+        const wordEl = document.createElement('div');
+        wordEl.className = 'croc-word-display';
+        wordEl.id = 'croc-word';
+        wordEl.textContent = state.currentWord;
+        area.appendChild(wordEl);
+      }
+
+      // Canvas
+      const wrap = document.createElement('div');
+      wrap.className = 'croc-canvas-wrap';
+      const canvas = document.createElement('canvas');
+      canvas.className = 'croc-canvas';
+      canvas.id = 'croc-canvas';
+      wrap.appendChild(canvas);
+      area.appendChild(wrap);
+
+      // Toolbar (drawer only)
+      if (isDrawer) {
+        const toolbar = document.createElement('div');
+        toolbar.className = 'croc-toolbar';
+
+        for (const c of CROC_COLORS) {
+          const swatch = document.createElement('div');
+          swatch.className = 'croc-color' + (c === crocColor ? ' active' : '');
+          swatch.style.background = c;
+          swatch.onclick = () => {
+            crocColor = c;
+            crocTool = 'pen';
+            toolbar.querySelectorAll('.croc-color').forEach((s) => s.classList.remove('active'));
+            swatch.classList.add('active');
+            toolbar.querySelector('.croc-eraser')?.classList.remove('active');
+          };
+          toolbar.appendChild(swatch);
+        }
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'croc-size-slider';
+        slider.min = '1';
+        slider.max = '16';
+        slider.value = String(crocSize);
+        slider.oninput = () => { crocSize = parseInt(slider.value, 10); };
+        toolbar.appendChild(slider);
+
+        const eraserBtn = document.createElement('button');
+        eraserBtn.className = 'croc-tool-btn croc-eraser';
+        eraserBtn.textContent = 'Ластик';
+        eraserBtn.onclick = () => {
+          crocTool = crocTool === 'eraser' ? 'pen' : 'eraser';
+          eraserBtn.classList.toggle('active', crocTool === 'eraser');
+        };
+        toolbar.appendChild(eraserBtn);
+
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'croc-tool-btn';
+        clearBtn.textContent = 'Очистить';
+        clearBtn.onclick = () => { crocClearCanvas(); send({ type: 'croc-clear' }); };
+        toolbar.appendChild(clearBtn);
+
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'croc-skip-btn';
+        skipBtn.textContent = 'Пропустить (-1)';
+        skipBtn.onclick = () => send({ type: 'croc-skip' });
+        toolbar.appendChild(skipBtn);
+
+        area.appendChild(toolbar);
+      }
+
+      // Guess area (non-drawer teammates)
+      if (!isDrawer) {
+        const guessArea = document.createElement('div');
+        guessArea.className = 'croc-guess-area';
+
+        const form = document.createElement('div');
+        form.className = 'croc-guess-form';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'croc-guess-input';
+        input.id = 'croc-guess-input';
+        input.placeholder = 'Ваш ответ...';
+        input.maxLength = 50;
+        input.autocomplete = 'off';
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'croc-guess-send';
+        sendBtn.textContent = 'Ответить';
+        const submitGuess = () => {
+          const text = input.value.trim();
+          if (text) { send({ type: 'croc-guess', text }); input.value = ''; }
+        };
+        sendBtn.onclick = submitGuess;
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitGuess(); });
+        form.appendChild(input);
+        form.appendChild(sendBtn);
+        guessArea.appendChild(form);
+
+        const log = document.createElement('div');
+        log.className = 'croc-guess-log';
+        log.id = 'croc-guess-log';
+        guessArea.appendChild(log);
+
+        area.appendChild(guessArea);
+      }
+
+      // Setup canvas after DOM is ready
+      requestAnimationFrame(() => {
+        const canvasEl = document.getElementById('croc-canvas');
+        if (canvasEl) crocSetupCanvas(canvasEl, isDrawer);
+      });
+
+      return;
+    }
+  }
+
+  // Update dynamic parts without rebuilding (guess log, word)
+  if (state.crocPhase === 'drawing') {
+    // Update word display
+    if (isDrawer) {
+      const wordEl = document.getElementById('croc-word');
+      if (wordEl && state.currentWord) wordEl.textContent = state.currentWord;
+    }
+
+    // Update guess log
+    const logEl = document.getElementById('croc-guess-log');
+    if (logEl && state.guessLog) {
+      logEl.innerHTML = '';
+      for (const g of state.guessLog) {
+        const item = document.createElement('div');
+        item.className = 'croc-guess-item' + (g.correct ? ' correct' : '');
+        item.innerHTML = `<span class="guess-name">${esc(g.playerName)}:</span> ${esc(g.text)}${g.correct ? ' ✓' : ''}`;
+        logEl.appendChild(item);
+      }
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  }
+}
+
+// ============================================================
 // SHARED: Player panel
 // ============================================================
 
@@ -728,7 +1038,7 @@ function renderPlayerPanel() {
   panel.innerHTML = '';
   const you = state.you;
   const gm = state.gameMode;
-  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || !state.paused);
+  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || gm === 'crocodile' || !state.paused);
 
   if (gm === 'spyfall') {
     // Single player list block
@@ -853,7 +1163,9 @@ function renderPlayerPanel() {
       for (const p of teamPlayers) {
         const entry = document.createElement('div');
         entry.className = 'operative-entry';
-        if (p.id === state.explainerId && state.phase === 'explaining') {
+        const isHighlighted = (p.id === state.explainerId && state.phase === 'explaining')
+          || (p.id === state.drawerId && state.crocPhase === 'drawing');
+        if (isHighlighted) {
           entry.style.fontWeight = '700';
           entry.textContent = '\u2605 ' + p.name;
         } else {
@@ -971,6 +1283,7 @@ function renderWinnerOverlay() {
   const screen = $('#game-screen');
   const hasWinner = state.gameMode === 'alias' ? state.phase === 'finished'
     : state.gameMode === 'spyfall' ? state.sfPhase === 'finished'
+    : state.gameMode === 'crocodile' ? state.crocPhase === 'finished'
     : !!state.winner;
 
   if (!hasWinner) {

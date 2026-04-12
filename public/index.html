@@ -17,6 +17,7 @@
         <button class="mode-card active" data-mode="codenames">Codenames</button>
         <button class="mode-card" data-mode="alias">Alias</button>
         <button class="mode-card" data-mode="spyfall">Шпион</button>
+        <button class="mode-card" data-mode="crocodile">Крокодил</button>
       </div>
       <button id="btn-create">Создать комнату</button>
       <div class="divider">или</div>
@@ -24,7 +25,7 @@
       <button id="btn-join">Присоединиться</button>
       <div id="join-error" class="error"></div>
     </div>
-    <div class="version">v1.5.0</div>
+    <div class="version">v1.6.0</div>
   </div>
 
   <!-- Game screen -->
@@ -72,6 +73,13 @@
               <label>Цель <select id="sa-target"><option value="15">15</option><option value="20">20</option><option value="30" selected>30</option><option value="50">50</option><option value="75">75</option><option value="100">100</option></select></label>
               <label>Сложность <select id="sa-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
             </div>
+            <!-- Crocodile settings -->
+            <div id="settings-crocodile" class="hidden">
+              <label>Команды <select id="sc-teams"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+              <label>Таймер <select id="sc-timer"><option value="60">60с</option><option value="90" selected>90с</option><option value="120">120с</option><option value="180">180с</option></select></label>
+              <label>Цель <select id="sc-target"><option value="5">5</option><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option><option value="30">30</option></select></label>
+              <label>Сложность <select id="sc-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
+            </div>
             <!-- Spyfall settings -->
             <div id="settings-spyfall" class="hidden">
               <label>Раунд <select id="ss-duration">
@@ -105,6 +113,9 @@
 
     <!-- Spyfall area -->
     <div id="spyfall-area" class="spyfall-center hidden"></div>
+
+    <!-- Crocodile area -->
+    <div id="crocodile-area" class="croc-center hidden"></div>
 
     <!-- Player panel -->
     <div id="player-panel" class="player-panel"></div>

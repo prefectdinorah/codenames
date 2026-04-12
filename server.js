@@ -5,6 +5,7 @@ const path = require('path');
 const codenamesWords = require('./words');
 const aliasWords = require('./alias-words');
 const spyfallLocations = require('./spyfall-locations');
+const crocodileWords = require('./crocodile-words');
 
 const app = express();
 const server = http.createServer(app);
@@ -233,6 +234,104 @@ function startSpyfallTimer(room) {
 }
 
 // ============================================================
+// ============================================================
+// CROCODILE GAME LOGIC
+// ============================================================
+
+function createCrocodileGame(settings) {
+  const teams = TEAM_IDS.slice(0, settings.teamCount || 2);
+  const difficulty = settings.difficulty || 'normal';
+  const pool = difficulty === 'hard'
+    ? shuffle([...crocodileWords.hard])
+    : shuffle([...crocodileWords.normal]);
+
+  const scores = {};
+  for (const t of teams) scores[t] = 0;
+
+  return {
+    teams, scores,
+    targetScore: settings.targetScore || 15,
+    difficulty,
+    currentTeamIndex: 0,
+    drawerId: null,
+    drawerHistory: {},
+    phase: 'waiting',
+    currentWord: null,
+    wordPool: pool,
+    wordIndex: 0,
+    paused: false,
+    timerDuration: settings.timerDuration || 90,
+    timerEnd: null,
+    timerRemaining: null,
+    guessLog: [],
+  };
+}
+
+function crocodileNextWord(game) {
+  if (game.wordIndex >= game.wordPool.length) {
+    game.wordPool = shuffle(game.wordPool);
+    game.wordIndex = 0;
+  }
+  game.currentWord = game.wordPool[game.wordIndex++];
+}
+
+function crocodileGetDrawer(room) {
+  const game = room.game;
+  const teamId = game.teams[game.currentTeamIndex];
+  const teamPlayers = [];
+  for (const [id, p] of room.players) {
+    if (p.team === teamId) teamPlayers.push(id);
+  }
+  if (teamPlayers.length === 0) return null;
+  const history = game.drawerHistory[teamId] || [];
+  let minCount = Infinity;
+  for (const id of teamPlayers) {
+    const count = history.filter((h) => h === id).length;
+    if (count < minCount) minCount = count;
+  }
+  const candidates = teamPlayers.filter((id) => history.filter((h) => h === id).length === minCount);
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+function startCrocodileTimer(room) {
+  clearTimer(room);
+  const duration = room.game.timerDuration;
+  if (!duration || duration <= 0) return;
+  room.game.timerEnd = Date.now() + duration * 1000;
+  room.game.timerRemaining = duration;
+  room.timerTimeout = setTimeout(() => {
+    if (room.game.paused || room.game.phase !== 'drawing') return;
+    crocodileEndTurn(room, false);
+    broadcastRoom(room);
+  }, duration * 1000);
+}
+
+function crocodileEndTurn(room, guessed) {
+  const game = room.game;
+  clearTimer(room);
+
+  if (guessed) {
+    const teamId = game.teams[game.currentTeamIndex];
+    game.scores[teamId]++;
+    if (game.scores[teamId] >= game.targetScore) {
+      game.phase = 'finished';
+      game.winner = teamId;
+      return;
+    }
+  }
+
+  game.currentTeamIndex = (game.currentTeamIndex + 1) % game.teams.length;
+  game.phase = 'waiting';
+  game.drawerId = null;
+  game.currentWord = null;
+  game.guessLog = [];
+}
+
+function normalizeGuess(text) {
+  return text.trim().toLowerCase().replace(/ё/g, 'е');
+}
+
+// ============================================================
 // SHARED: Room management
 // ============================================================
 
@@ -246,6 +345,9 @@ function createRoom(hostId, gameMode) {
   } else if (gameMode === 'spyfall') {
     settings = { roundDuration: 480 };
     game = createSpyfallGame(settings);
+  } else if (gameMode === 'crocodile') {
+    settings = { teamCount: 2, timerDuration: 90, targetScore: 15, difficulty: 'normal' };
+    game = createCrocodileGame(settings);
   } else {
     settings = { teamCount: 2, gridRows: 5, gridCols: 5, timerDuration: 0 };
     game = createCodenamesGame(settings);
@@ -320,6 +422,12 @@ function resumeTimerFor(room) {
       room.game.winner = 'players';
       room.game.winReason = 'timer';
       clearTimer(room);
+      broadcastRoom(room);
+    }, remaining * 1000);
+  } else if (room.gameMode === 'crocodile') {
+    room.timerTimeout = setTimeout(() => {
+      if (room.game.paused || room.game.phase !== 'drawing') return;
+      crocodileEndTurn(room, false);
       broadcastRoom(room);
     }, remaining * 1000);
   } else if (room.gameMode === 'alias') {
@@ -477,6 +585,21 @@ function getCodenamesState(room, playerId) {
   };
 }
 
+function getCrocodileState(room, playerId) {
+  const game = room.game;
+  const isDrawer = playerId === game.drawerId;
+  return {
+    crocPhase: game.phase,
+    targetScore: game.targetScore,
+    difficulty: game.difficulty,
+    currentTeamIndex: game.currentTeamIndex,
+    drawerId: game.drawerId,
+    currentWord: isDrawer ? game.currentWord : null,
+    guessLog: game.guessLog,
+    winner: game.winner,
+  };
+}
+
 function getSpyfallState(room, playerId) {
   const game = room.game;
   const myAssignment = game.assignments[playerId] || null;
@@ -547,6 +670,8 @@ function getPlayerState(room, playerId) {
     Object.assign(base, getAliasState(room, playerId));
   } else if (room.gameMode === 'spyfall') {
     Object.assign(base, getSpyfallState(room, playerId));
+  } else if (room.gameMode === 'crocodile') {
+    Object.assign(base, getCrocodileState(room, playerId));
   } else {
     Object.assign(base, getCodenamesState(room, playerId));
   }
@@ -656,6 +781,10 @@ wss.on('connection', (ws) => {
 
     if (currentRoom && currentRoom.gameMode === 'spyfall') {
       handleSpyfallMsg(currentRoom, playerId, msg);
+    }
+
+    if (currentRoom && currentRoom.gameMode === 'crocodile') {
+      handleCrocodileMsg(currentRoom, playerId, msg, ws);
     }
   });
 
@@ -982,6 +1111,123 @@ function handleSpyfallMsg(room, playerId, msg) {
     clearTimer(room);
     room.game = createSpyfallGame(room.settings);
     // Keep player assignments (team: 'player')
+    broadcastRoom(room);
+  }
+}
+
+// ============================================================
+// CROCODILE MESSAGE HANDLER
+// ============================================================
+
+function handleCrocodileMsg(room, playerId, msg, ws) {
+  const game = room.game;
+
+  // Drawing relay — NOT through broadcastRoom, direct relay
+  if (msg.type === 'croc-draw') {
+    if (playerId !== game.drawerId || game.phase !== 'drawing') return;
+    const data = JSON.stringify({ type: 'croc-draw', points: msg.points, color: msg.color, size: msg.size, tool: msg.tool });
+    for (const [id, p] of room.players) {
+      if (id !== playerId && p.ws.readyState === 1) p.ws.send(data);
+    }
+    return;
+  }
+
+  if (msg.type === 'croc-clear') {
+    if (playerId !== game.drawerId || game.phase !== 'drawing') return;
+    const data = JSON.stringify({ type: 'croc-clear' });
+    for (const [id, p] of room.players) {
+      if (id !== playerId && p.ws.readyState === 1) p.ws.send(data);
+    }
+    return;
+  }
+
+  if (msg.type === 'update-settings') {
+    if (playerId !== room.hostId) return;
+    const teamCount = Math.max(2, Math.min(5, parseInt(msg.teamCount, 10) || 2));
+    const timerDuration = Math.max(30, Math.min(300, parseInt(msg.timerDuration, 10) || 90));
+    const targetScore = Math.max(5, Math.min(50, parseInt(msg.targetScore, 10) || 15));
+    const difficulty = msg.difficulty === 'hard' ? 'hard' : 'normal';
+    room.settings = { teamCount, timerDuration, targetScore, difficulty };
+    clearTimer(room);
+    room.game = createCrocodileGame(room.settings);
+    const validTeams = TEAM_IDS.slice(0, teamCount);
+    for (const [, p] of room.players) {
+      if (p.team && !validTeams.includes(p.team)) { p.team = null; p.role = null; }
+    }
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'start-turn') {
+    if (game.phase !== 'waiting' || game.paused) return;
+    const drawerId = crocodileGetDrawer(room);
+    if (!drawerId) return;
+    const teamId = game.teams[game.currentTeamIndex];
+    if (!game.drawerHistory[teamId]) game.drawerHistory[teamId] = [];
+    game.drawerHistory[teamId].push(drawerId);
+    game.drawerId = drawerId;
+    game.phase = 'drawing';
+    game.guessLog = [];
+    crocodileNextWord(game);
+    startCrocodileTimer(room);
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'croc-guess') {
+    if (game.phase !== 'drawing') return;
+    if (playerId === game.drawerId) return;
+    const player = room.players.get(playerId);
+    if (!player) return;
+    // Only teammates can guess
+    const teamId = game.teams[game.currentTeamIndex];
+    if (player.team !== teamId) return;
+
+    const text = (msg.text || '').trim();
+    if (!text || text.length > 50) return;
+
+    const isCorrect = normalizeGuess(text) === normalizeGuess(game.currentWord);
+    game.guessLog.push({ playerId, playerName: player.name, text, correct: isCorrect });
+
+    if (isCorrect) {
+      crocodileEndTurn(room, true);
+    }
+
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'croc-skip') {
+    if (game.phase !== 'drawing' || playerId !== game.drawerId) return;
+    const teamId = game.teams[game.currentTeamIndex];
+    game.scores[teamId] = Math.max(0, game.scores[teamId] - 1);
+    crocodileNextWord(game);
+    game.guessLog = [];
+    // Clear canvas for all
+    const data = JSON.stringify({ type: 'croc-clear' });
+    for (const [, p] of room.players) {
+      if (p.ws.readyState === 1) p.ws.send(data);
+    }
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'new-game') {
+    if (playerId !== room.hostId) return;
+    clearTimer(room);
+    room.game = createCrocodileGame(room.settings);
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'shuffle-players') {
+    if (playerId !== room.hostId) return;
+    clearTimer(room);
+    room.game = createCrocodileGame(room.settings);
+    const allIds = [...room.players.entries()].filter(([, p]) => p.team !== null).map(([id]) => id);
+    if (allIds.length === 0) { broadcastRoom(room); return; }
+    const shuffled = shuffle(allIds);
+    const teams = room.game.teams;
+    let idx = 0, teamIdx = 0;
+    while (idx < shuffled.length) {
+      const p = room.players.get(shuffled[idx]);
+      p.team = teams[teamIdx % teams.length]; p.role = 'player'; idx++; teamIdx++;
+    }
     broadcastRoom(room);
   }
 }

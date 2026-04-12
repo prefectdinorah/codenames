@@ -96,6 +96,7 @@ body {
 .gm-codenames { background: rgba(52,152,219,0.2); color: #3498db; }
 .gm-alias { background: rgba(230,126,34,0.2); color: #e67e22; }
 .gm-spyfall { background: rgba(155,89,182,0.2); color: #9b59b6; }
+.gm-crocodile { background: rgba(46,204,113,0.2); color: #2ecc71; }
 
 .version {
   position: fixed;
@@ -978,6 +979,156 @@ body {
   justify-content: space-between;
 }
 .sf-result-spy { color: #e74c3c; font-weight: 700; }
+
+/* ========== Crocodile ========== */
+.croc-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.croc-word-display {
+  font-size: 1.8em;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #2ecc71;
+  padding: 10px 30px;
+  background: rgba(46,204,113,0.1);
+  border-radius: 10px;
+}
+
+.croc-canvas-wrap {
+  width: 100%;
+  max-width: 600px;
+  aspect-ratio: 4/3;
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  border: 2px solid #444;
+}
+.croc-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+.croc-canvas.readonly {
+  cursor: default;
+  pointer-events: none;
+}
+
+.croc-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.croc-color {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.croc-color.active { border-color: #fff; }
+.croc-color:hover { border-color: rgba(255,255,255,0.5); }
+
+.croc-size-slider {
+  width: 80px;
+  accent-color: #2ecc71;
+}
+
+.croc-tool-btn {
+  padding: 5px 12px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #16213e;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 12px;
+}
+.croc-tool-btn.active { background: #2ecc71; color: #fff; border-color: #2ecc71; }
+.croc-tool-btn:hover { border-color: #888; }
+
+.croc-guess-area {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.croc-guess-form {
+  display: flex;
+  gap: 6px;
+}
+.croc-guess-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 2px solid #444;
+  border-radius: 8px;
+  background: #16213e;
+  color: #eee;
+  font-size: 15px;
+}
+.croc-guess-input:focus { outline: none; border-color: #2ecc71; }
+.croc-guess-send {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #2ecc71;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+.croc-guess-log {
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.croc-guess-item {
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+.croc-guess-item.correct {
+  background: rgba(46,204,113,0.2);
+  color: #2ecc71;
+  font-weight: 700;
+}
+.croc-guess-item .guess-name {
+  color: #888;
+  margin-right: 6px;
+}
+
+.croc-skip-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  background: #e67e22;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.croc-waiting-card {
+  background: rgba(255,255,255,0.04);
+  border-radius: 16px;
+  padding: 30px 40px;
+  font-size: 1.3em;
+  color: #888;
+  text-align: center;
+}
 
 /* ========== Responsive ========== */
 @media (max-width: 800px) {
