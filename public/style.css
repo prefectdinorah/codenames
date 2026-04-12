@@ -62,14 +62,39 @@ body {
 #btn-join { background: #3498db; color: #fff; }
 .divider { color: #666; font-size: 14px; }
 .error { color: #e74c3c; font-size: 14px; }
-.game-switch { margin-top: 8px; }
-.game-switch a {
-  color: #888;
-  font-size: 13px;
-  text-decoration: none;
-  transition: color 0.2s;
+.mode-selector {
+  display: flex;
+  gap: 8px;
 }
-.game-switch a:hover { color: #3498db; }
+.mode-card {
+  flex: 1;
+  padding: 12px 8px;
+  border: 2px solid #333;
+  border-radius: 10px;
+  background: #16213e;
+  color: #888;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.mode-card:hover { border-color: #555; }
+.mode-card.active {
+  border-color: #3498db;
+  color: #eee;
+  background: rgba(52, 152, 219, 0.1);
+}
+
+.game-mode-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.gm-codenames { background: rgba(52,152,219,0.2); color: #3498db; }
+.gm-alias { background: rgba(230,126,34,0.2); color: #e67e22; }
 
 .version {
   position: fixed;

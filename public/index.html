@@ -3,36 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Codenames</title>
+  <title>Codenames & Alias</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- Join overlay (shown when not in a room) -->
+  <!-- Join overlay -->
   <div id="join-overlay" class="overlay active">
     <div class="join-box">
-      <h1>Codenames</h1>
+      <h1 id="join-title">Игры</h1>
       <input type="text" id="player-name" placeholder="Твоё имя" maxlength="20" autocomplete="off">
+      <div class="mode-selector">
+        <button class="mode-card active" data-mode="codenames">Codenames</button>
+        <button class="mode-card" data-mode="alias">Alias</button>
+      </div>
       <button id="btn-create">Создать комнату</button>
       <div class="divider">или</div>
       <input type="text" id="room-code-input" placeholder="Код комнаты" maxlength="4" autocomplete="off">
       <button id="btn-join">Присоединиться</button>
       <div id="join-error" class="error"></div>
-      <div class="game-switch">
-        <a href="/alias">Играть в Alias</a>
-      </div>
     </div>
-    <div class="version">v1.3.0</div>
+    <div class="version">v1.4.0</div>
   </div>
 
-  <!-- Game screen (always visible once joined) -->
+  <!-- Game screen -->
   <div id="game-screen" class="game-screen hidden">
 
-    <!-- Top bar -->
     <div class="top-bar">
       <div class="top-left">
         <span class="room-label">Комната:</span>
         <span id="room-code" class="room-code"></span>
+        <span id="game-mode-badge" class="game-mode-badge"></span>
       </div>
       <div class="top-center">
         <div id="scores-bar" class="scores-bar"></div>
@@ -45,52 +46,39 @@
       </div>
     </div>
 
-    <!-- Turn / clue / timer bar -->
     <div class="info-bar">
       <div id="turn-indicator" class="turn-indicator"></div>
       <div id="timer-display" class="timer-display hidden"></div>
       <div id="clue-display" class="clue-display"></div>
       <div class="action-buttons">
-        <button id="btn-pause" class="btn-action host-only hidden" title="Пауза">&#9208; Пауза</button>
-        <button id="btn-restart" class="btn-action host-only hidden" title="Рестарт">&#8635; Рестарт</button>
-        <button id="btn-shuffle" class="btn-action host-only hidden" title="Перемешать игроков">&#8645; Шафл</button>
+        <button id="btn-pause" class="btn-action host-only hidden">&#9208; Пауза</button>
+        <button id="btn-restart" class="btn-action host-only hidden">&#8635; Рестарт</button>
+        <button id="btn-shuffle" class="btn-action host-only hidden">&#8645; Шафл</button>
         <div id="settings-wrap" class="settings-wrap host-only hidden">
-          <button id="btn-settings" class="btn-action" title="Настройки">&#9881; Настройки</button>
+          <button id="btn-settings" class="btn-action">&#9881; Настройки</button>
           <div id="settings-dropdown" class="settings-dropdown hidden">
-            <label>Команды
-              <select id="s-teams">
-                <option value="2">2</option><option value="3">3</option>
-                <option value="4">4</option><option value="5">5</option>
-              </select>
-            </label>
-            <label>Строки
-              <select id="s-rows">
-                <option value="4">4</option><option value="5" selected>5</option>
-                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-              </select>
-            </label>
-            <label>Столбцы
-              <select id="s-cols">
-                <option value="4">4</option><option value="5" selected>5</option>
-                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-              </select>
-            </label>
-            <label>Таймер
-              <select id="s-timer">
-                <option value="0">Выкл</option>
-                <option value="30">30с</option><option value="60">60с</option>
-                <option value="90">90с</option><option value="120">120с</option>
-                <option value="180">180с</option>
-              </select>
-            </label>
+            <!-- Codenames settings -->
+            <div id="settings-codenames" class="hidden">
+              <label>Команды <select id="s-teams"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+              <label>Строки <select id="s-rows"><option value="4">4</option><option value="5" selected>5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
+              <label>Столбцы <select id="s-cols"><option value="4">4</option><option value="5" selected>5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
+              <label>Таймер <select id="s-timer"><option value="0">Выкл</option><option value="30">30с</option><option value="60">60с</option><option value="90">90с</option><option value="120">120с</option><option value="180">180с</option></select></label>
+            </div>
+            <!-- Alias settings -->
+            <div id="settings-alias" class="hidden">
+              <label>Команды <select id="sa-teams"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+              <label>Таймер <select id="sa-timer"><option value="30">30с</option><option value="45">45с</option><option value="60" selected>60с</option><option value="90">90с</option><option value="120">120с</option></select></label>
+              <label>Цель <select id="sa-target"><option value="15">15</option><option value="20">20</option><option value="30" selected>30</option><option value="50">50</option><option value="75">75</option><option value="100">100</option></select></label>
+              <label>Сложность <select id="sa-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
+            </div>
             <button id="btn-apply-settings">Применить</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Main area: clue history + board + clue history -->
-    <div class="game-body">
+    <!-- Codenames area -->
+    <div id="codenames-area" class="game-body hidden">
       <div id="clue-history-left" class="clue-sidebar"></div>
       <div class="board-area">
         <div id="board" class="board"></div>
@@ -104,7 +92,10 @@
       <div id="clue-history-right" class="clue-sidebar"></div>
     </div>
 
-    <!-- Player panel: teams + spectators -->
+    <!-- Alias area -->
+    <div id="alias-area" class="alias-center hidden"></div>
+
+    <!-- Player panel -->
     <div id="player-panel" class="player-panel"></div>
 
     <!-- Pause overlay -->
