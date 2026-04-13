@@ -13,10 +13,6 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// /games or /games/ROOMCODE — serve the same SPA, client reads code from URL
-app.get('/games', (req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));
-app.get('/games/:code', (req, res) => res.sendFile(path.join(__dirname, 'public/index.html')));
-
 const rooms = new Map();
 
 const TEAM_IDS = ['red', 'blue', 'green', 'orange', 'purple'];

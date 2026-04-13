@@ -22,11 +22,8 @@ function connect() {
   ws = new WebSocket(`${protocol}//${location.host}`);
 
   ws.onopen = () => {
-    // Support both /#CODE and /games/CODE
     const hash = location.hash.slice(1);
-    const pathMatch = location.pathname.match(/\/games\/([A-Z0-9]{4})$/i);
-    const code = hash || (pathMatch && pathMatch[1]);
-    if (code) send({ type: 'join-room', name: getPlayerName(), code });
+    if (hash) send({ type: 'join-room', name: getPlayerName(), code: hash });
   };
 
   ws.onmessage = (e) => {
@@ -138,11 +135,7 @@ function render() {
 
   $('#join-overlay').classList.remove('active');
   $('#game-screen').classList.remove('hidden');
-  // Update URL to /games/CODE without page reload
-  const targetPath = `/games/${state.roomCode}`;
-  if (location.pathname !== targetPath) {
-    history.replaceState(null, '', targetPath);
-  }
+  location.hash = state.roomCode;
 
   const you = state.you;
   const isHost = you && you.id === state.hostId;
