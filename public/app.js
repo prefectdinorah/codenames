@@ -69,6 +69,14 @@ $('#name-input').addEventListener('keydown', (e) => {
 });
 
 // ===== Controls =====
+$('#btn-leave').onclick = () => {
+  state = null;
+  location.hash = '';
+  ws.close();
+  $('#game-screen').classList.add('hidden');
+  $('#join-overlay').classList.add('active');
+  setTimeout(connect, 300);
+};
 $('#btn-pause').onclick = () => send({ type: 'toggle-pause' });
 $('#btn-unpause').onclick = () => send({ type: 'toggle-pause' });
 $('#btn-restart').onclick = () => send({ type: 'new-game' });

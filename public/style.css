@@ -161,6 +161,21 @@ body {
   margin-bottom: 1px;
 }
 
+.btn-leave {
+  background: rgba(231,76,60,0.15);
+  border: none;
+  color: #e74c3c;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-leave:hover { background: rgba(231,76,60,0.3); }
+
 .name-editor {
   display: flex;
   gap: 4px;
