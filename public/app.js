@@ -120,6 +120,12 @@ $('#btn-apply-settings').onclick = () => {
       targetScore: $('#sc-target').value,
       difficulty: $('#sc-difficulty').value,
     });
+  } else if (state.gameMode === 'whoami') {
+    send({
+      type: 'update-settings',
+      mode: $('#sw-mode').value,
+      turnDuration: $('#sw-timer').value,
+    });
   }
   $('#settings-dropdown').classList.add('hidden');
 };
@@ -164,10 +170,12 @@ function render() {
   $('#alias-area').classList.toggle('hidden', gm !== 'alias');
   $('#spyfall-area').classList.toggle('hidden', gm !== 'spyfall');
   $('#crocodile-area').classList.toggle('hidden', gm !== 'crocodile');
+  $('#whoami-area').classList.toggle('hidden', gm !== 'whoami');
   $('#settings-codenames').classList.toggle('hidden', gm !== 'codenames');
   $('#settings-alias').classList.toggle('hidden', gm !== 'alias');
   $('#settings-spyfall').classList.toggle('hidden', gm !== 'spyfall');
   $('#settings-crocodile').classList.toggle('hidden', gm !== 'crocodile');
+  $('#settings-whoami').classList.toggle('hidden', gm !== 'whoami');
   $('#clue-display').classList.toggle('hidden', gm !== 'codenames');
 
   // Settings values
@@ -189,6 +197,9 @@ function render() {
       $('#sc-timer').value = state.settings.timerDuration;
       $('#sc-target').value = state.settings.targetScore;
       $('#sc-difficulty').value = state.settings.difficulty;
+    } else if (gm === 'whoami') {
+      $('#sw-mode').value = state.settings.mode;
+      $('#sw-timer').value = state.settings.turnDuration;
     }
   }
 
@@ -209,6 +220,9 @@ function render() {
   } else if (gm === 'crocodile') {
     renderCrocodileTurnInfo();
     renderCrocodileArea();
+  } else if (gm === 'whoami') {
+    renderWhoamiTurnInfo();
+    renderWhoamiArea();
   }
 
   renderPlayerPanel();
@@ -221,6 +235,18 @@ function renderScores() {
   const bar = $('#scores-bar');
   bar.innerHTML = '';
   const gm = state.gameMode;
+
+  if (gm === 'whoami') {
+    const inGame = Object.keys(state.assignments || {}).length;
+    const badge = document.createElement('div');
+    badge.className = 'score-badge';
+    badge.style.background = 'rgba(241,196,15,0.2)';
+    badge.style.color = '#f1c40f';
+    const modeLabel = state.wmMode === 'turns' ? 'По очереди' : 'Свободный';
+    badge.innerHTML = `<span class="s-label">${modeLabel}</span>Игроков: ${inGame}`;
+    bar.appendChild(badge);
+    return;
+  }
 
   if (gm === 'crocodile') {
     for (const teamId of state.teams) {
@@ -752,6 +778,181 @@ function toggleLocationGrid() {
 }
 
 // ============================================================
+// WHOAMI
+// ============================================================
+
+function renderWhoamiTurnInfo() {
+  const turnEl = $('#turn-indicator');
+  if (state.wmPhase === 'finished') { turnEl.textContent = ''; return; }
+  if (state.wmPhase === 'setup') {
+    const allReady = state.allReady;
+    turnEl.textContent = allReady ? 'Все слова назначены — можно начинать!' : 'Назначьте слова всем игрокам';
+    turnEl.style.color = allReady ? '#2ecc71' : '#f1c40f';
+    return;
+  }
+  if (state.wmPhase === 'playing') {
+    if (state.wmMode === 'turns' && state.currentTurnPlayer) {
+      const p = state.players.find((pl) => pl.id === state.currentTurnPlayer);
+      turnEl.textContent = `Ход: ${p ? p.name : '???'}`;
+      turnEl.style.color = '#f1c40f';
+    } else {
+      turnEl.textContent = 'Свободный режим — обсуждайте!';
+      turnEl.style.color = '#f1c40f';
+    }
+  }
+}
+
+let wmNotebookTimer = null;
+
+function renderWhoamiArea() {
+  const area = $('#whoami-area');
+  area.innerHTML = '';
+  const you = state.you;
+  const isHost = you && you.id === state.hostId;
+  const isPlayer = you && you.team === 'player';
+  const assignments = state.assignments || {};
+
+  // Player cards grid
+  const grid = document.createElement('div');
+  grid.className = 'wm-players-grid';
+
+  const playerIds = Object.keys(assignments);
+  for (const pid of playerIds) {
+    const p = state.players.find((pl) => pl.id === pid);
+    if (!p) continue;
+    const a = assignments[pid];
+    const isMe = you && pid === you.id;
+
+    const card = document.createElement('div');
+    card.className = 'wm-player-card';
+
+    // Name
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'wm-player-name';
+    nameDiv.textContent = p.name;
+    if (state.finishedPlayers && state.finishedPlayers.includes(pid)) {
+      const badge = document.createElement('span');
+      badge.className = 'wm-finished-badge';
+      badge.textContent = 'Угадал!';
+      nameDiv.appendChild(badge);
+    }
+    card.appendChild(nameDiv);
+
+    // Word tablet
+    const tablet = document.createElement('div');
+    tablet.className = 'wm-word-tablet';
+    if (isMe) {
+      tablet.classList.add('wm-you');
+      if (a.word) {
+        // Game finished or guessed — show word
+        tablet.textContent = a.word;
+        tablet.classList.remove('wm-you');
+        tablet.style.color = '#2ecc71';
+      } else {
+        tablet.textContent = a.hasWord ? '???' : 'Ожидает слово...';
+      }
+    } else if (a.word) {
+      tablet.textContent = a.word;
+    } else {
+      tablet.classList.add('wm-hidden');
+      tablet.textContent = 'Нет слова';
+    }
+    card.appendChild(tablet);
+
+    // Assign form (setup phase, can assign to others, not yourself)
+    if (state.wmPhase === 'setup' && !isMe && isPlayer) {
+      const form = document.createElement('div');
+      form.className = 'wm-assign-form';
+      const input = document.createElement('input');
+      input.className = 'wm-assign-input';
+      input.placeholder = 'Написать слово...';
+      input.maxLength = 40;
+      if (a.word) input.value = a.word;
+      const btn = document.createElement('button');
+      btn.className = 'wm-assign-btn';
+      btn.textContent = a.word ? 'Изменить' : 'Записать';
+      btn.onclick = () => {
+        const word = input.value.trim();
+        if (word) send({ type: 'assign-word', targetId: pid, word });
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+      form.appendChild(input);
+      form.appendChild(btn);
+      card.appendChild(form);
+    }
+
+    grid.appendChild(card);
+  }
+  area.appendChild(grid);
+
+  // Start button (host, setup, all ready)
+  if (state.wmPhase === 'setup' && isHost && state.allReady && playerIds.length >= 2) {
+    const btn = document.createElement('button');
+    btn.className = 'alias-btn alias-btn-start';
+    btn.textContent = 'Начать игру';
+    btn.onclick = () => send({ type: 'start-game' });
+    area.appendChild(btn);
+  }
+
+  // Turns mode: guess + skip
+  if (state.wmPhase === 'playing' && state.wmMode === 'turns' && isPlayer) {
+    const isMyTurn = you && you.id === state.currentTurnPlayer;
+    const alreadyGuessed = state.finishedPlayers && state.finishedPlayers.includes(you.id);
+
+    if (isMyTurn && !alreadyGuessed) {
+      const guessForm = document.createElement('div');
+      guessForm.className = 'wm-guess-form';
+      const input = document.createElement('input');
+      input.className = 'wm-guess-input';
+      input.placeholder = 'Моя догадка...';
+      input.maxLength = 40;
+      const guessBtn = document.createElement('button');
+      guessBtn.className = 'wm-guess-btn';
+      guessBtn.textContent = 'Угадать';
+      guessBtn.onclick = () => {
+        const word = input.value.trim();
+        if (word) { send({ type: 'guess-word', word }); input.value = ''; }
+      };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') guessBtn.click(); });
+      const skipBtn = document.createElement('button');
+      skipBtn.className = 'wm-skip-btn';
+      skipBtn.textContent = 'Пропустить';
+      skipBtn.onclick = () => send({ type: 'skip-turn' });
+      guessForm.appendChild(input);
+      guessForm.appendChild(guessBtn);
+      guessForm.appendChild(skipBtn);
+      area.appendChild(guessForm);
+    } else if (!isMyTurn && !alreadyGuessed) {
+      const msg = document.createElement('div');
+      msg.className = 'wm-status-msg';
+      const tp = state.players.find((pl) => pl.id === state.currentTurnPlayer);
+      msg.textContent = `Сейчас ход: ${tp ? tp.name : '???'}`;
+      area.appendChild(msg);
+    }
+  }
+
+  // Notebook (private, for players only)
+  if (isPlayer && (state.wmPhase === 'playing' || state.wmPhase === 'setup')) {
+    const nb = document.createElement('div');
+    nb.className = 'wm-notebook';
+    const h4 = document.createElement('h4');
+    h4.textContent = 'Записная книжка (только вы видите)';
+    nb.appendChild(h4);
+    const textarea = document.createElement('textarea');
+    textarea.value = state.notebook || '';
+    textarea.placeholder = 'Заметки...';
+    textarea.oninput = () => {
+      clearTimeout(wmNotebookTimer);
+      wmNotebookTimer = setTimeout(() => {
+        send({ type: 'save-notebook', text: textarea.value });
+      }, 500);
+    };
+    nb.appendChild(textarea);
+    area.appendChild(nb);
+  }
+}
+
+// ============================================================
 // CROCODILE
 // ============================================================
 
@@ -1035,9 +1236,9 @@ function renderPlayerPanel() {
   panel.innerHTML = '';
   const you = state.you;
   const gm = state.gameMode;
-  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || gm === 'crocodile' || !state.paused);
+  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || gm === 'crocodile' || gm === 'whoami' || !state.paused);
 
-  if (gm === 'spyfall') {
+  if (gm === 'spyfall' || gm === 'whoami') {
     // Single player list block
     const inGame = state.players.filter((p) => p.team === 'player');
     const block = document.createElement('div');
@@ -1281,6 +1482,7 @@ function renderWinnerOverlay() {
   const hasWinner = state.gameMode === 'alias' ? state.phase === 'finished'
     : state.gameMode === 'spyfall' ? state.sfPhase === 'finished'
     : state.gameMode === 'crocodile' ? state.crocPhase === 'finished'
+    : state.gameMode === 'whoami' ? state.wmPhase === 'finished'
     : !!state.winner;
 
   if (!hasWinner) {
@@ -1292,6 +1494,17 @@ function renderWinnerOverlay() {
   screen.style.paddingTop = '90px';
 
   const text = $('#winner-text');
+
+  if (state.gameMode === 'whoami') {
+    if (state.winner) {
+      const w = state.players.find((p) => p.id === state.winner);
+      text.textContent = `${w ? w.name : '???'} угадал первым!`;
+    } else {
+      text.textContent = 'Игра окончена!';
+    }
+    text.style.color = '#f1c40f';
+    return;
+  }
 
   if (state.gameMode === 'spyfall') {
     const reasons = {

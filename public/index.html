@@ -18,6 +18,7 @@
         <option value="alias">Alias</option>
         <option value="spyfall">Один Шпион</option>
         <option value="crocodile">Крокодил</option>
+        <option value="whoami">Кто я?</option>
       </select>
       <button id="btn-create">Создать комнату</button>
       <div class="divider">или</div>
@@ -25,7 +26,7 @@
       <button id="btn-join">Присоединиться</button>
       <div id="join-error" class="error"></div>
     </div>
-    <div class="version">v1.6.0</div>
+    <div class="version">v1.7.0</div>
   </div>
 
   <!-- Game screen -->
@@ -74,6 +75,19 @@
               <label>Цель <select id="sa-target"><option value="15">15</option><option value="20">20</option><option value="30" selected>30</option><option value="50">50</option><option value="75">75</option><option value="100">100</option></select></label>
               <label>Сложность <select id="sa-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
             </div>
+            <!-- Whoami settings -->
+            <div id="settings-whoami" class="hidden">
+              <label>Режим <select id="sw-mode">
+                <option value="free">Свободный</option>
+                <option value="turns">По очереди</option>
+              </select></label>
+              <label>Таймер хода <select id="sw-timer">
+                <option value="60">1 мин</option>
+                <option value="120" selected>2 мин</option>
+                <option value="180">3 мин</option>
+                <option value="300">5 мин</option>
+              </select></label>
+            </div>
             <!-- Crocodile settings -->
             <div id="settings-crocodile" class="hidden">
               <label>Команды <select id="sc-teams"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
@@ -117,6 +131,9 @@
 
     <!-- Crocodile area -->
     <div id="crocodile-area" class="croc-center hidden"></div>
+
+    <!-- Whoami area -->
+    <div id="whoami-area" class="whoami-center hidden"></div>
 
     <!-- Player panel -->
     <div id="player-panel" class="player-panel"></div>

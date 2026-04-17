@@ -87,6 +87,7 @@ body {
 .gm-alias { background: rgba(230,126,34,0.2); color: #e67e22; }
 .gm-spyfall { background: rgba(155,89,182,0.2); color: #9b59b6; }
 .gm-crocodile { background: rgba(46,204,113,0.2); color: #2ecc71; }
+.gm-whoami { background: rgba(241,196,15,0.2); color: #f1c40f; }
 
 .version {
   position: fixed;
@@ -984,6 +985,193 @@ body {
   justify-content: space-between;
 }
 .sf-result-spy { color: #e74c3c; font-weight: 700; }
+
+/* ========== Whoami ========== */
+.whoami-center {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 10px 0;
+}
+
+.wm-players-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.wm-player-card {
+  background: #16213e;
+  border: 2px solid #333;
+  border-radius: 12px;
+  padding: 14px;
+  min-width: 180px;
+  max-width: 240px;
+  flex: 1;
+  text-align: center;
+}
+
+.wm-player-name {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.wm-word-tablet {
+  background: #2a2a3e;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 40px;
+  font-size: 1.2em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #f1c40f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  word-break: break-word;
+}
+
+.wm-word-tablet.wm-hidden {
+  color: #555;
+  font-style: italic;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.9em;
+}
+
+.wm-word-tablet.wm-you {
+  background: rgba(241,196,15,0.1);
+  border: 1px dashed #f1c40f;
+  color: #888;
+  font-weight: 400;
+  text-transform: none;
+  font-size: 0.9em;
+}
+
+.wm-assign-form {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.wm-assign-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #1a1a2e;
+  color: #eee;
+  font-size: 13px;
+}
+.wm-assign-input:focus { outline: none; border-color: #f1c40f; }
+
+.wm-assign-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #f1c40f;
+  color: #1a1a2e;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.wm-notebook {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.wm-notebook h4 {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.wm-notebook textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: #16213e;
+  color: #eee;
+  font-size: 14px;
+  resize: vertical;
+  font-family: inherit;
+}
+.wm-notebook textarea:focus { outline: none; border-color: #f1c40f; }
+
+.wm-guess-form {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+.wm-guess-input {
+  padding: 10px 14px;
+  border: 2px solid #444;
+  border-radius: 8px;
+  background: #16213e;
+  color: #eee;
+  font-size: 15px;
+  width: 200px;
+}
+.wm-guess-input:focus { outline: none; border-color: #f1c40f; }
+
+.wm-guess-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background: #f1c40f;
+  color: #1a1a2e;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.wm-skip-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #e67e22;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.wm-turn-indicator {
+  text-align: center;
+  font-size: 1.1em;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(241,196,15,0.1);
+}
+
+.wm-finished-badge {
+  display: inline-block;
+  background: rgba(46,204,113,0.2);
+  color: #2ecc71;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.wm-status-msg {
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+  padding: 10px;
+}
 
 /* ========== Crocodile ========== */
 .croc-center {

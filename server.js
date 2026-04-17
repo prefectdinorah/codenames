@@ -231,6 +231,30 @@ function startSpyfallTimer(room) {
 
 // ============================================================
 // ============================================================
+// WHOAMI GAME LOGIC
+// ============================================================
+
+function createWhoamiGame(settings) {
+  return {
+    teams: [],
+    scores: {},
+    phase: 'setup',      // setup | playing | finished
+    mode: settings.mode || 'free',  // 'free' | 'turns'
+    turnDuration: settings.turnDuration || 120,
+    assignments: {},     // playerId -> { word: string|null, assignedBy: string|null }
+    notebooks: {},       // playerId -> string (private notes)
+    turnOrder: [],
+    turnIndex: 0,
+    currentTurnPlayer: null,
+    timerEnd: null,
+    timerRemaining: null,
+    paused: false,
+    winner: null,
+    finishedPlayers: [],  // playerIds who guessed correctly
+  };
+}
+
+// ============================================================
 // CROCODILE GAME LOGIC
 // ============================================================
 
@@ -344,6 +368,9 @@ function createRoom(hostId, gameMode) {
   } else if (gameMode === 'crocodile') {
     settings = { teamCount: 2, timerDuration: 90, targetScore: 15, difficulty: 'normal' };
     game = createCrocodileGame(settings);
+  } else if (gameMode === 'whoami') {
+    settings = { mode: 'free', turnDuration: 120 };
+    game = createWhoamiGame(settings);
   } else {
     settings = { teamCount: 2, gridRows: 5, gridCols: 5, timerDuration: 0 };
     game = createCodenamesGame(settings);
@@ -424,6 +451,12 @@ function resumeTimerFor(room) {
     room.timerTimeout = setTimeout(() => {
       if (room.game.paused || room.game.phase !== 'drawing') return;
       crocodileEndTurn(room, false);
+      broadcastRoom(room);
+    }, remaining * 1000);
+  } else if (room.gameMode === 'whoami') {
+    room.timerTimeout = setTimeout(() => {
+      if (room.game.paused || room.game.phase !== 'playing') return;
+      whoamiNextTurn(room);
       broadcastRoom(room);
     }, remaining * 1000);
   } else if (room.gameMode === 'alias') {
@@ -581,6 +614,37 @@ function getCodenamesState(room, playerId) {
   };
 }
 
+function getWhoamiState(room, playerId) {
+  const game = room.game;
+  // Build assignments visible to this player:
+  // - You can see everyone's word EXCEPT your own
+  // - You can see your own only if game is finished or you guessed
+  const visibleAssignments = {};
+  for (const [id, a] of Object.entries(game.assignments)) {
+    if (id === playerId) {
+      visibleAssignments[id] = {
+        word: game.phase === 'finished' || game.finishedPlayers.includes(playerId) ? a.word : null,
+        hasWord: !!a.word,
+      };
+    } else {
+      visibleAssignments[id] = { word: a.word, hasWord: !!a.word };
+    }
+  }
+
+  return {
+    wmPhase: game.phase,
+    wmMode: game.mode,
+    turnDuration: game.turnDuration,
+    assignments: visibleAssignments,
+    notebook: game.notebooks[playerId] || '',
+    turnOrder: game.turnOrder,
+    currentTurnPlayer: game.currentTurnPlayer,
+    winner: game.winner,
+    finishedPlayers: game.finishedPlayers,
+    allReady: Object.values(game.assignments).every((a) => !!a.word),
+  };
+}
+
 function getCrocodileState(room, playerId) {
   const game = room.game;
   const isDrawer = playerId === game.drawerId;
@@ -668,6 +732,8 @@ function getPlayerState(room, playerId) {
     Object.assign(base, getSpyfallState(room, playerId));
   } else if (room.gameMode === 'crocodile') {
     Object.assign(base, getCrocodileState(room, playerId));
+  } else if (room.gameMode === 'whoami') {
+    Object.assign(base, getWhoamiState(room, playerId));
   } else {
     Object.assign(base, getCodenamesState(room, playerId));
   }
@@ -730,8 +796,20 @@ wss.on('connection', (ws) => {
       if (currentRoom.game.paused && !goingSpectator && currentRoom.gameMode === 'codenames') return;
 
       const team = msg.team || null;
+
+      // Whoami: register/unregister player in assignments
+      if (currentRoom.gameMode === 'whoami') {
+        const game = currentRoom.game;
+        if (team === 'player' && !game.assignments[playerId]) {
+          game.assignments[playerId] = { word: null, assignedBy: null };
+          game.notebooks[playerId] = '';
+        } else if (!team && game.assignments[playerId]) {
+          delete game.assignments[playerId];
+          delete game.notebooks[playerId];
+        }
+      }
       const role = msg.role || null;
-      if (currentRoom.gameMode === 'spyfall') {
+      if (currentRoom.gameMode === 'spyfall' || currentRoom.gameMode === 'whoami') {
         if (team && team !== 'player') return;
       } else {
         if (team && !currentRoom.game.teams.includes(team)) return;
@@ -788,6 +866,10 @@ wss.on('connection', (ws) => {
 
     if (currentRoom && currentRoom.gameMode === 'crocodile') {
       handleCrocodileMsg(currentRoom, playerId, msg, ws);
+    }
+
+    if (currentRoom && currentRoom.gameMode === 'whoami') {
+      handleWhoamiMsg(currentRoom, playerId, msg);
     }
   });
 
@@ -1230,6 +1312,144 @@ function handleCrocodileMsg(room, playerId, msg, ws) {
     while (idx < shuffled.length) {
       const p = room.players.get(shuffled[idx]);
       p.team = teams[teamIdx % teams.length]; p.role = 'player'; idx++; teamIdx++;
+    }
+    broadcastRoom(room);
+  }
+}
+
+// ============================================================
+// WHOAMI MESSAGE HANDLER
+// ============================================================
+
+function whoamiStartTurnTimer(room) {
+  clearTimer(room);
+  const duration = room.game.turnDuration;
+  if (!duration || duration <= 0) return;
+  room.game.timerEnd = Date.now() + duration * 1000;
+  room.game.timerRemaining = duration;
+  room.timerTimeout = setTimeout(() => {
+    if (room.game.paused || room.game.phase !== 'playing') return;
+    whoamiNextTurn(room);
+    broadcastRoom(room);
+  }, duration * 1000);
+}
+
+function whoamiNextTurn(room) {
+  const game = room.game;
+  if (game.mode !== 'turns') return;
+  // Find next player who hasn't finished
+  const activePlayers = game.turnOrder.filter((id) => !game.finishedPlayers.includes(id) && room.players.has(id));
+  if (activePlayers.length === 0) { game.phase = 'finished'; clearTimer(room); return; }
+
+  game.turnIndex = (game.turnIndex + 1) % activePlayers.length;
+  game.currentTurnPlayer = activePlayers[game.turnIndex % activePlayers.length];
+  whoamiStartTurnTimer(room);
+}
+
+function handleWhoamiMsg(room, playerId, msg) {
+  const game = room.game;
+
+  if (msg.type === 'update-settings') {
+    if (playerId !== room.hostId) return;
+    const mode = msg.mode === 'turns' ? 'turns' : 'free';
+    const turnDuration = Math.max(30, Math.min(600, parseInt(msg.turnDuration, 10) || 120));
+    room.settings = { mode, turnDuration };
+    clearTimer(room);
+    room.game = createWhoamiGame(room.settings);
+    // Re-register existing players
+    for (const [id, p] of room.players) {
+      if (p.team === 'player') {
+        room.game.assignments[id] = { word: null, assignedBy: null };
+        room.game.notebooks[id] = '';
+      }
+    }
+    broadcastRoom(room);
+  }
+
+  // Assign a word to another player (anyone can do this)
+  if (msg.type === 'assign-word') {
+    if (game.phase !== 'setup') return;
+    const targetId = msg.targetId;
+    const word = (msg.word || '').trim().slice(0, 40);
+    if (!word || targetId === playerId) return;
+    if (!game.assignments[targetId]) return;
+    game.assignments[targetId] = { word, assignedBy: playerId };
+    broadcastRoom(room);
+  }
+
+  // Start game (host only, all players must have words)
+  if (msg.type === 'start-game') {
+    if (playerId !== room.hostId) return;
+    if (game.phase !== 'setup') return;
+    const playerIds = Object.keys(game.assignments);
+    if (playerIds.length < 2) return;
+    if (!playerIds.every((id) => game.assignments[id].word)) return;
+
+    game.phase = 'playing';
+    game.turnOrder = shuffle(playerIds);
+    game.turnIndex = 0;
+
+    if (game.mode === 'turns') {
+      game.currentTurnPlayer = game.turnOrder[0];
+      whoamiStartTurnTimer(room);
+    }
+    broadcastRoom(room);
+  }
+
+  // Save notebook (private)
+  if (msg.type === 'save-notebook') {
+    if (!game.assignments[playerId]) return;
+    game.notebooks[playerId] = (msg.text || '').slice(0, 2000);
+    // Don't broadcast — only affects this player's state
+    const player = room.players.get(playerId);
+    if (player && player.ws.readyState === 1) {
+      player.ws.send(JSON.stringify(getPlayerState(room, playerId)));
+    }
+  }
+
+  // Guess your word (turns mode)
+  if (msg.type === 'guess-word') {
+    if (game.phase !== 'playing' || game.mode !== 'turns') return;
+    if (game.finishedPlayers.includes(playerId)) return;
+    const guess = (msg.word || '').trim().toLowerCase().replace(/ё/g, 'е');
+    const actual = (game.assignments[playerId]?.word || '').toLowerCase().replace(/ё/g, 'е');
+    if (!guess || !actual) return;
+
+    if (guess === actual) {
+      game.finishedPlayers.push(playerId);
+      // In turns mode, first to guess wins
+      if (game.finishedPlayers.length === 1) {
+        game.winner = playerId;
+      }
+      // Check if all done
+      const activePlayers = Object.keys(game.assignments).filter((id) => room.players.has(id));
+      if (game.finishedPlayers.length >= activePlayers.length) {
+        game.phase = 'finished';
+        clearTimer(room);
+      } else if (game.currentTurnPlayer === playerId) {
+        whoamiNextTurn(room);
+      }
+    }
+    broadcastRoom(room);
+  }
+
+  // Skip turn (turns mode)
+  if (msg.type === 'skip-turn') {
+    if (game.phase !== 'playing' || game.mode !== 'turns') return;
+    if (playerId !== game.currentTurnPlayer) return;
+    whoamiNextTurn(room);
+    broadcastRoom(room);
+  }
+
+  if (msg.type === 'new-game') {
+    if (playerId !== room.hostId) return;
+    clearTimer(room);
+    room.game = createWhoamiGame(room.settings);
+    for (const [id, p] of room.players) {
+      if (p.team === 'player') {
+        room.game.assignments[id] = { word: null, assignedBy: null };
+        room.game.notebooks[id] = '';
+      }
     }
     broadcastRoom(room);
   }
