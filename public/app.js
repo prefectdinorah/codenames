@@ -106,6 +106,7 @@ $('#btn-apply-settings').onclick = () => {
       timerDuration: $('#sa-timer').value,
       targetScore: $('#sa-target').value,
       difficulty: $('#sa-difficulty').value,
+      skipPenalty: $('#sa-skip').value,
     });
   } else if (state.gameMode === 'spyfall') {
     send({
@@ -190,6 +191,7 @@ function render() {
       $('#sa-timer').value = state.settings.timerDuration;
       $('#sa-target').value = state.settings.targetScore;
       $('#sa-difficulty').value = state.settings.difficulty;
+      $('#sa-skip').value = state.settings.skipPenalty ? 'true' : 'false';
     } else if (gm === 'spyfall') {
       $('#ss-duration').value = state.settings.roundDuration;
     } else if (gm === 'crocodile') {
@@ -518,11 +520,16 @@ function renderAliasArea() {
       correctBtn.onclick = () => send({ type: 'word-correct' });
       const skipBtn = document.createElement('button');
       skipBtn.className = 'alias-btn alias-btn-skip';
-      skipBtn.textContent = 'Пропуск';
+      skipBtn.textContent = state.skipPenalty ? 'Пропуск (-1)' : 'Пропуск';
       skipBtn.onclick = () => send({ type: 'word-skip' });
       btns.appendChild(correctBtn);
       btns.appendChild(skipBtn);
       area.appendChild(btns);
+    }
+
+    // Word list during explaining
+    if (state.turnWords && state.turnWords.length > 0) {
+      area.appendChild(renderAliasWordList(false));
     }
   }
 
@@ -539,20 +546,7 @@ function renderAliasArea() {
     area.appendChild(scoreDiv);
 
     if (state.turnWords) {
-      const review = document.createElement('div');
-      review.className = 'alias-review';
-      state.turnWords.forEach((w, i) => {
-        const item = document.createElement('div');
-        item.className = `alias-review-item alias-review-${w.result}`;
-        item.innerHTML = `<span class="alias-review-word">${esc(w.word)}</span><span class="alias-review-badge">${w.result === 'correct' ? '+1' : '-1'}</span>`;
-        if (isHost || isExplainer) {
-          item.style.cursor = 'pointer';
-          item.title = 'Нажмите чтобы изменить';
-          item.onclick = () => send({ type: 'toggle-word-result', index: i });
-        }
-        review.appendChild(item);
-      });
-      area.appendChild(review);
+      area.appendChild(renderAliasWordList(true));
     }
 
     if (isHost || isExplainer) {
@@ -778,6 +772,31 @@ function toggleLocationGrid() {
 }
 
 // ============================================================
+// Alias word list helper
+function renderAliasWordList(editable) {
+  const you = state.you;
+  const isExplainer = you && you.id === state.explainerId;
+  const isHost = you && you.id === state.hostId;
+  const canEdit = editable && (isHost || isExplainer);
+  const skipPenalty = state.skipPenalty;
+
+  const review = document.createElement('div');
+  review.className = 'alias-review';
+  state.turnWords.forEach((w, i) => {
+    const item = document.createElement('div');
+    item.className = `alias-review-item alias-review-${w.result}`;
+    const badge = w.result === 'correct' ? '+1' : (skipPenalty ? '-1' : '0');
+    item.innerHTML = `<span class="alias-review-word">${esc(w.word)}</span><span class="alias-review-badge">${badge}</span>`;
+    if (canEdit) {
+      item.style.cursor = 'pointer';
+      item.title = 'Нажмите чтобы изменить';
+      item.onclick = () => send({ type: 'toggle-word-result', index: i });
+    }
+    review.appendChild(item);
+  });
+  return review;
+}
+
 // WHOAMI
 // ============================================================
 

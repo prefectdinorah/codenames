@@ -110,8 +110,9 @@ function createAliasGame(settings) {
     currentWord: null,
     wordPool: pool,
     wordIndex: 0,
-    turnWords: [],         // [{word, result: 'correct'|'skipped'}]
+    turnWords: [],
     turnScore: 0,
+    skipPenalty: settings.skipPenalty !== false,
     paused: false,
     timerDuration: settings.timerDuration || 60,
     timerEnd: null,
@@ -360,7 +361,7 @@ function createRoom(hostId, gameMode) {
   let settings, game;
 
   if (gameMode === 'alias') {
-    settings = { teamCount: 2, timerDuration: 60, targetScore: 30, difficulty: 'normal' };
+    settings = { teamCount: 2, timerDuration: 60, targetScore: 30, difficulty: 'normal', skipPenalty: true };
     game = createAliasGame(settings);
   } else if (gameMode === 'spyfall') {
     settings = { roundDuration: 480 };
@@ -697,9 +698,9 @@ function getAliasState(room, playerId) {
     currentTeamIndex: game.currentTeamIndex,
     explainerId: game.explainerId,
     currentWord: isExplainer && game.phase === 'explaining' ? game.currentWord : null,
-    turnWords: game.phase === 'review' || game.phase === 'finished' ? game.turnWords : null,
+    turnWords: game.turnWords,
     turnScore: game.turnScore,
-    turnWordCount: game.turnWords.length,
+    skipPenalty: game.skipPenalty,
   };
 }
 
@@ -994,7 +995,8 @@ function handleAliasMsg(room, playerId, msg) {
     const timerDuration = Math.max(10, Math.min(300, parseInt(msg.timerDuration, 10) || 60));
     const targetScore = Math.max(5, Math.min(100, parseInt(msg.targetScore, 10) || 30));
     const difficulty = msg.difficulty === 'hard' ? 'hard' : 'normal';
-    room.settings = { teamCount, timerDuration, targetScore, difficulty };
+    const skipPenalty = msg.skipPenalty !== 'false' && msg.skipPenalty !== false;
+    room.settings = { teamCount, timerDuration, targetScore, difficulty, skipPenalty };
     clearTimer(room);
     room.game = createAliasGame(room.settings);
     const validTeams = TEAM_IDS.slice(0, teamCount);
@@ -1031,7 +1033,7 @@ function handleAliasMsg(room, playerId, msg) {
   if (msg.type === 'word-skip') {
     if (game.phase !== 'explaining' || playerId !== game.explainerId) return;
     game.turnWords.push({ word: game.currentWord, result: 'skipped' });
-    game.turnScore--;
+    if (game.skipPenalty) game.turnScore--;
     aliasNextWord(game);
     broadcastRoom(room);
   }
@@ -1042,8 +1044,9 @@ function handleAliasMsg(room, playerId, msg) {
     const idx = parseInt(msg.index, 10);
     if (isNaN(idx) || idx < 0 || idx >= game.turnWords.length) return;
     const w = game.turnWords[idx];
-    if (w.result === 'correct') { w.result = 'skipped'; game.turnScore -= 2; }
-    else { w.result = 'correct'; game.turnScore += 2; }
+    const penalty = game.skipPenalty ? 1 : 0;
+    if (w.result === 'correct') { w.result = 'skipped'; game.turnScore -= (1 + penalty); }
+    else { w.result = 'correct'; game.turnScore += (1 + penalty); }
     broadcastRoom(room);
   }
 
