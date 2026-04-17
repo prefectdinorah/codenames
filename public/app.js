@@ -19,7 +19,7 @@ function getPlayerName() {
 // ===== WebSocket =====
 function connect() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${protocol}//${location.host}`);
+  ws = new WebSocket(`${protocol}//${location.host}${location.pathname}`);
 
   ws.onopen = () => {
     const hash = location.hash.slice(1);
