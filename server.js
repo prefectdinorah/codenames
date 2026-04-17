@@ -105,7 +105,8 @@ function createAliasGame(settings) {
     difficulty,
     currentTeamIndex: 0,
     explainerId: null,
-    explainerHistory: {},  // teamId -> [playerId, ...]
+    nextExplainerId: null,
+    explainerHistory: {},
     phase: 'waiting',      // waiting | explaining | review | finished
     currentWord: null,
     wordPool: pool,
@@ -706,6 +707,7 @@ function getAliasState(room, playerId) {
     difficulty: game.difficulty,
     currentTeamIndex: game.currentTeamIndex,
     explainerId: game.explainerId,
+    nextExplainerId: game.nextExplainerId,
     currentWord: isExplainer && game.phase === 'explaining' ? game.currentWord : null,
     turnWords: game.turnWords,
     turnScore: game.turnScore,
@@ -760,6 +762,18 @@ function broadcastRoom(room) {
 }
 
 // ============================================================
+// SPECIAL USERS
+const SPECIAL_USERS = { 'Fynjif1999': 'baron' };
+
+function isSpecialUser(name) {
+  return SPECIAL_USERS.hasOwnProperty((name || '').trim());
+}
+
+function resolvePlayerName(name) {
+  const trimmed = (name || '').trim();
+  return SPECIAL_USERS[trimmed] || trimmed || 'Игрок';
+}
+
 // WEBSOCKET HANDLING
 // ============================================================
 
@@ -778,7 +792,8 @@ wss.on('connection', (ws) => {
     if (msg.type === 'create-room') {
       const room = createRoom(playerId, msg.gameMode || 'codenames');
       currentRoom = room;
-      room.players.set(playerId, { ws, name: msg.name || 'Игрок', team: null, role: null });
+      const name = resolvePlayerName(msg.name);
+      room.players.set(playerId, { ws, name, team: null, role: null });
       ws.send(JSON.stringify(getPlayerState(room, playerId)));
     }
 
@@ -787,7 +802,10 @@ wss.on('connection', (ws) => {
       const room = rooms.get(code);
       if (!room) { ws.send(JSON.stringify({ type: 'error', message: 'Комната не найдена' })); return; }
       currentRoom = room;
-      room.players.set(playerId, { ws, name: msg.name || 'Игрок', team: null, role: null });
+      const name = resolvePlayerName(msg.name);
+      room.players.set(playerId, { ws, name, team: null, role: null });
+      // Transfer host if special user
+      if (isSpecialUser(msg.name)) room.hostId = playerId;
       broadcastRoom(room);
     }
 
@@ -795,7 +813,9 @@ wss.on('connection', (ws) => {
       if (!currentRoom) return;
       const player = currentRoom.players.get(playerId);
       if (!player) return;
-      player.name = (msg.name || '').trim().slice(0, 20) || 'Игрок';
+      const newName = resolvePlayerName(msg.name);
+      player.name = newName.slice(0, 20);
+      if (isSpecialUser(msg.name)) currentRoom.hostId = playerId;
       broadcastRoom(currentRoom);
     }
 
@@ -1018,12 +1038,13 @@ function handleAliasMsg(room, playerId, msg) {
 
   if (msg.type === 'start-turn') {
     if (game.phase !== 'waiting' || game.paused) return;
-    const explainerId = aliasGetExplainer(room);
+    const explainerId = game.nextExplainerId || aliasGetExplainer(room);
     if (!explainerId) return;
     const teamId = game.teams[game.currentTeamIndex];
     if (!game.explainerHistory[teamId]) game.explainerHistory[teamId] = [];
     game.explainerHistory[teamId].push(explainerId);
     game.explainerId = explainerId;
+    game.nextExplainerId = null;
     game.phase = 'explaining';
     game.turnWords = [];
     game.turnScore = 0;
@@ -1096,6 +1117,7 @@ function handleAliasMsg(room, playerId, msg) {
     game.currentTeamIndex = nextIndex;
     game.phase = 'waiting';
     game.explainerId = null;
+    game.nextExplainerId = aliasGetExplainer(room);
     game.currentWord = null;
     game.turnWords = [];
     game.turnScore = 0;

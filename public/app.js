@@ -477,9 +477,14 @@ function renderAliasArea() {
   const explainer = state.players.find((p) => p.id === state.explainerId);
 
   if (state.phase === 'waiting') {
+    const nextExp = state.nextExplainerId ? state.players.find((p) => p.id === state.nextExplainerId) : null;
     const card = document.createElement('div');
     card.className = 'alias-waiting-card';
-    card.textContent = 'Нажмите "Старт" чтобы начать ход';
+    if (nextExp) {
+      card.innerHTML = `Объясняет: <strong style="color:${info.color}">${esc(nextExp.name)}</strong>`;
+    } else {
+      card.textContent = 'Нажмите "Старт" чтобы начать ход';
+    }
     area.appendChild(card);
 
     const btn = document.createElement('button');
