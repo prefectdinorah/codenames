@@ -113,6 +113,8 @@ function createAliasGame(settings) {
     turnWords: [],
     turnScore: 0,
     skipPenalty: settings.skipPenalty !== false,
+    finalRound: false,
+    finalRoundStarter: null,
     paused: false,
     timerDuration: settings.timerDuration || 60,
     timerEnd: null,
@@ -138,15 +140,22 @@ function aliasGetExplainer(room) {
   if (teamPlayers.length === 0) return null;
 
   const history = game.explainerHistory[teamId] || [];
-  // Pick the player who has explained the fewest times
+  const lastExplainer = history.length > 0 ? history[history.length - 1] : null;
+
+  // Pick the player who has explained the fewest times, excluding last explainer if possible
   let minCount = Infinity;
   for (const id of teamPlayers) {
     const count = history.filter((h) => h === id).length;
     if (count < minCount) minCount = count;
   }
-  const candidates = teamPlayers.filter((id) => {
+  let candidates = teamPlayers.filter((id) => {
     return history.filter((h) => h === id).length === minCount;
   });
+  // Avoid picking the same person twice in a row (if more than 1 player)
+  if (candidates.length > 1 && lastExplainer) {
+    candidates = candidates.filter((id) => id !== lastExplainer);
+  }
+  if (candidates.length === 0) candidates = teamPlayers;
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
@@ -701,6 +710,7 @@ function getAliasState(room, playerId) {
     turnWords: game.turnWords,
     turnScore: game.turnScore,
     skipPenalty: game.skipPenalty,
+    finalRound: game.finalRound,
   };
 }
 
@@ -1056,14 +1066,34 @@ function handleAliasMsg(room, playerId, msg) {
     const teamId = game.teams[game.currentTeamIndex];
     game.scores[teamId] = Math.max(0, game.scores[teamId] + game.turnScore);
 
-    if (game.scores[teamId] >= game.targetScore) {
-      game.phase = 'finished';
-      game.winner = teamId;
-      broadcastRoom(room);
-      return;
+    const reachedTarget = game.scores[teamId] >= game.targetScore;
+
+    if (reachedTarget && !game.finalRound) {
+      // First team to reach target — start final round for remaining teams
+      game.finalRound = true;
+      game.finalRoundStarter = game.currentTeamIndex;
     }
 
-    game.currentTeamIndex = (game.currentTeamIndex + 1) % game.teams.length;
+    // Move to next team
+    const nextIndex = (game.currentTeamIndex + 1) % game.teams.length;
+
+    if (game.finalRound) {
+      // Check if we've gone full circle back to the team that started final round
+      if (nextIndex === game.finalRoundStarter) {
+        // All teams had their chance — determine winner
+        let maxScore = -1;
+        let winner = null;
+        for (const t of game.teams) {
+          if (game.scores[t] > maxScore) { maxScore = game.scores[t]; winner = t; }
+        }
+        game.phase = 'finished';
+        game.winner = winner;
+        broadcastRoom(room);
+        return;
+      }
+    }
+
+    game.currentTeamIndex = nextIndex;
     game.phase = 'waiting';
     game.explainerId = null;
     game.currentWord = null;

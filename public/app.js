@@ -460,7 +460,8 @@ function renderAliasTurnInfo() {
   const diffBadge = `<span class="alias-difficulty-badge alias-difficulty-${state.difficulty}">${state.difficulty === 'hard' ? 'сложный' : 'нормальный'}</span>`;
 
   const phaseText = { waiting: 'подготовка', explaining: 'объясняет', review: 'проверка' };
-  turnEl.innerHTML = `${esc(info.name)} — ${phaseText[state.phase] || ''} ${diffBadge}`;
+  const finalBadge = state.finalRound ? ' <span style="color:#e74c3c;font-weight:700">ФИНАЛ</span>' : '';
+  turnEl.innerHTML = `${esc(info.name)} — ${phaseText[state.phase] || ''} ${diffBadge}${finalBadge}`;
   turnEl.style.color = info.color;
 }
 
