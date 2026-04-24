@@ -4,6 +4,21 @@
   const $$ = (sel, root) => (root || document).querySelectorAll(sel);
 
   // ======= API helpers =======
+  // App may be served under a prefix (e.g. /games/ behind nginx); resolve absolute /api paths
+  // to the same prefix so they reach the codenames container, not siblings.
+  const APP_BASE = (() => {
+    const p = location.pathname;
+    if (p.endsWith('/')) return p.replace(/\/$/, '');
+    const i = p.lastIndexOf('/');
+    return i > 0 ? p.substring(0, i) : '';
+  })();
+
+  function url(path) {
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('/')) return APP_BASE + path;
+    return path;
+  }
+
   function adminName() { return localStorage.getItem('codenames-name') || ''; }
 
   async function api(path, opts) {
@@ -13,7 +28,7 @@
       headers['Content-Type'] = 'application/json';
       o.body = JSON.stringify(o.json);
     }
-    const res = await fetch(path, { method: o.method || 'GET', headers, body: o.body });
+    const res = await fetch(url(path), { method: o.method || 'GET', headers, body: o.body });
     if (!res.ok) {
       let err = 'request failed';
       try { err = (await res.json()).error || err; } catch (_) {}
@@ -98,7 +113,7 @@
     // Called both by admin (after changes) and by app.js after state update.
     const sel = document.querySelector('#sm-deck');
     if (!sel) return;
-    fetch('/api/monopoly/decks').then((r) => r.json()).then((data) => {
+    fetch(url('/api/monopoly/decks')).then((r) => r.json()).then((data) => {
       const prev = sel.value;
       sel.innerHTML = '';
       for (const d of data.decks || []) {
@@ -629,7 +644,7 @@
       ev.preventDefault();
       const fd = new FormData(form);
       try {
-        const res = await fetch('/api/admin/logos', {
+        const res = await fetch(url('/api/admin/logos'), {
           method: 'POST',
           headers: { 'X-Admin-Name': adminName() },
           body: fd,
