@@ -6,12 +6,137 @@ const codenamesWords = require('./words');
 const aliasWords = require('./alias-words');
 const spyfallLocations = require('./spyfall-locations');
 const crocodileWords = require('./crocodile-words');
+const monopolyData = require('./monopoly-data');
+const monopolyStore = require('./monopoly-store');
+const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api', express.json({ limit: '2mb' }));
+
+// ============================================================
+// ADMIN API (monopoly editor)
+// ============================================================
+
+const SPECIAL_USER_NAMES = new Set(['Fynjif1999']);
+
+function adminAuth(req, res, next) {
+  const name = (req.header('x-admin-name') || '').trim();
+  if (!SPECIAL_USER_NAMES.has(name)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  req.adminName = name;
+  next();
+}
+
+const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'image/gif'].includes(file.mimetype);
+    cb(ok ? null : new Error('unsupported image type'), ok);
+  },
+});
+
+// Public: list deck names (for game settings)
+app.get('/api/monopoly/decks', (_req, res) => {
+  res.json({ decks: monopolyStore.listDecks() });
+});
+
+app.get('/api/admin/state', adminAuth, (_req, res) => {
+  const s = monopolyStore.getState();
+  res.json({ decks: s.decks, logos: s.logos, s3Enabled: monopolyStore.s3Enabled });
+});
+
+app.get('/api/admin/decks', adminAuth, (_req, res) => {
+  res.json({ decks: monopolyStore.listDecks() });
+});
+
+app.get('/api/admin/decks/:id', adminAuth, (req, res) => {
+  const deck = monopolyStore.getDeck(req.params.id);
+  if (!deck) return res.status(404).json({ error: 'not found' });
+  res.json({ id: req.params.id, deck });
+});
+
+app.put('/api/admin/decks/:id', adminAuth, async (req, res) => {
+  try {
+    const deck = req.body;
+    if (!deck || !deck.name || !Array.isArray(deck.board)) {
+      return res.status(400).json({ error: 'invalid deck' });
+    }
+    const saved = await monopolyStore.saveDeck(req.params.id, deck);
+    res.json({ id: req.params.id, deck: saved });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/decks/:id', adminAuth, async (req, res) => {
+  try {
+    await monopolyStore.deleteDeck(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/decks/:id/duplicate', adminAuth, async (req, res) => {
+  try {
+    const src = monopolyStore.getDeck(req.params.id);
+    if (!src) return res.status(404).json({ error: 'source not found' });
+    const newId = (req.body?.newId || `deck_${Date.now()}`).toString().replace(/[^a-z0-9_-]/gi, '_');
+    const newName = (req.body?.newName || `${src.name} (копия)`).toString();
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.name = newName;
+    copy.locked = false;
+    await monopolyStore.saveDeck(newId, copy);
+    res.json({ id: newId, deck: copy });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/logos', adminAuth, (_req, res) => {
+  res.json({ logos: monopolyStore.listLogos() });
+});
+
+app.post('/api/admin/logos', adminAuth, logoUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'no file' });
+    const entry = await monopolyStore.uploadLogo({
+      buffer: req.file.buffer,
+      mimetype: req.file.mimetype,
+      name: req.body.name,
+      tags: req.body.tags,
+    });
+    res.json({ logo: entry });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/logos/:id', adminAuth, async (req, res) => {
+  try {
+    await monopolyStore.deleteLogo(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/logos/:id/usage', adminAuth, (req, res) => {
+  res.json({ usage: monopolyStore.findLogoUsage(req.params.id) });
+});
+
+// Base URL for Spyfall location images (e.g. "https://bucket.s3.amazonaws.com/spyfall/").
+// If empty, clients render placeholder cards without images.
+const SPYFALL_IMAGE_BASE = process.env.SPYFALL_IMAGE_BASE || '';
+const SPYFALL_IMAGE_EXT = process.env.SPYFALL_IMAGE_EXT || 'jpg';
+const MONOPOLY_IMAGE_BASE = process.env.MONOPOLY_IMAGE_BASE || '';
+const MONOPOLY_IMAGE_EXT = process.env.MONOPOLY_IMAGE_EXT || 'png';
 
 const rooms = new Map();
 
@@ -165,7 +290,13 @@ function aliasGetExplainer(room) {
 // SPYFALL GAME LOGIC
 // ============================================================
 
+function pickSpyfallLocations(count) {
+  const pool = shuffle(spyfallLocations);
+  return pool.slice(0, Math.min(count, pool.length));
+}
+
 function createSpyfallGame(settings) {
+  const locationCount = settings.locationCount || 30;
   return {
     phase: 'lobby',
     location: null,
@@ -178,7 +309,7 @@ function createSpyfallGame(settings) {
     accusation: null,
     winner: null,
     winReason: null,
-    allLocations: shuffle(spyfallLocations.map((l) => l.name)),
+    allLocations: pickSpyfallLocations(locationCount),
     turnOrder: [],
     turnIndex: 0,
     currentAsker: null,
@@ -195,7 +326,8 @@ function startSpyfallRound(room) {
   }
   if (playerIds.length < 3) return false;
 
-  const location = spyfallLocations[Math.floor(Math.random() * spyfallLocations.length)];
+  const pool = game.allLocations.length ? game.allLocations : pickSpyfallLocations(room.settings.locationCount || 30);
+  const location = pool[Math.floor(Math.random() * pool.length)];
   const shuffledPlayers = shuffle(playerIds);
   const spyId = shuffledPlayers[0];
   const roles = shuffle([...location.roles]);
@@ -219,7 +351,7 @@ function startSpyfallRound(room) {
   game.turnOrder = shuffle(playerIds);
   game.turnIndex = 0;
   game.currentAsker = game.turnOrder[0];
-  game.allLocations = shuffle(spyfallLocations.map((l) => l.name));
+  game.allLocations = shuffle(pool);
 
   startSpyfallTimer(room);
   return true;
@@ -374,7 +506,7 @@ function createRoom(hostId, gameMode) {
     settings = { teamCount: 2, timerDuration: 60, targetScore: 30, difficulty: 'normal', skipPenalty: true };
     game = createAliasGame(settings);
   } else if (gameMode === 'spyfall') {
-    settings = { roundDuration: 480 };
+    settings = { roundDuration: 480, locationCount: 30 };
     game = createSpyfallGame(settings);
   } else if (gameMode === 'crocodile') {
     settings = { teamCount: 2, timerDuration: 90, targetScore: 15, difficulty: 'normal' };
@@ -382,6 +514,9 @@ function createRoom(hostId, gameMode) {
   } else if (gameMode === 'whoami') {
     settings = { mode: 'free', turnDuration: 120 };
     game = createWhoamiGame(settings);
+  } else if (gameMode === 'monopoly') {
+    settings = { startingMoney: 1500, deckId: 'classic' };
+    game = createMonopolyGame(settings);
   } else {
     settings = { teamCount: 2, gridRows: 5, gridCols: 5, timerDuration: 0 };
     game = createCodenamesGame(settings);
@@ -408,8 +543,12 @@ function clearTimer(room) {
 
 function startCodenamesTimer(room) {
   clearTimer(room);
-  const duration = room.settings.timerDuration;
+  let duration = room.settings.timerDuration;
   if (!duration || duration <= 0) return;
+  // First team's first turn gets +60s — they see the grid for the first time
+  if (room.game.turn === room.game.firstTeam && room.game.clueHistory.length === 0) {
+    duration += 60;
+  }
   room.game.timerEnd = Date.now() + duration * 1000;
   room.game.timerRemaining = duration;
   room.timerTimeout = setTimeout(() => {
@@ -671,17 +810,29 @@ function getCrocodileState(room, playerId) {
   };
 }
 
+function locationImageUrl(slug) {
+  if (!SPYFALL_IMAGE_BASE || !slug) return null;
+  const sep = SPYFALL_IMAGE_BASE.endsWith('/') ? '' : '/';
+  return `${SPYFALL_IMAGE_BASE}${sep}${slug}.${SPYFALL_IMAGE_EXT}`;
+}
+
+function serializeLocation(loc) {
+  return { slug: loc.slug, name: loc.name, image: locationImageUrl(loc.slug) };
+}
+
 function getSpyfallState(room, playerId) {
   const game = room.game;
   const myAssignment = game.assignments[playerId] || null;
   const isFinished = game.phase === 'finished';
+  const knowsLocation = (myAssignment && !myAssignment.isSpy) || isFinished;
 
   return {
     sfPhase: game.phase,
     roundDuration: game.roundDuration,
     yourRole: myAssignment ? myAssignment.role : null,
     yourIsSpy: myAssignment ? myAssignment.isSpy : false,
-    location: (myAssignment && !myAssignment.isSpy) || isFinished ? game.location?.name : null,
+    location: knowsLocation && game.location ? game.location.name : null,
+    locationSlug: knowsLocation && game.location ? game.location.slug : null,
     allAssignments: isFinished ? game.assignments : null,
     spyId: isFinished ? game.spyId : null,
     accusation: game.accusation ? {
@@ -692,7 +843,7 @@ function getSpyfallState(room, playerId) {
     } : null,
     currentAsker: game.currentAsker,
     turnOrder: game.turnOrder,
-    allLocations: game.allLocations,
+    allLocations: game.allLocations.map(serializeLocation),
     winner: game.winner,
     winReason: game.winReason,
   };
@@ -747,6 +898,8 @@ function getPlayerState(room, playerId) {
     Object.assign(base, getCrocodileState(room, playerId));
   } else if (room.gameMode === 'whoami') {
     Object.assign(base, getWhoamiState(room, playerId));
+  } else if (room.gameMode === 'monopoly') {
+    Object.assign(base, getMonopolyState(room, playerId));
   } else {
     Object.assign(base, getCodenamesState(room, playerId));
   }
@@ -840,7 +993,7 @@ wss.on('connection', (ws) => {
         }
       }
       const role = msg.role || null;
-      if (currentRoom.gameMode === 'spyfall' || currentRoom.gameMode === 'whoami') {
+      if (currentRoom.gameMode === 'spyfall' || currentRoom.gameMode === 'whoami' || currentRoom.gameMode === 'monopoly') {
         if (team && team !== 'player') return;
       } else {
         if (team && !currentRoom.game.teams.includes(team)) return;
@@ -901,6 +1054,10 @@ wss.on('connection', (ws) => {
 
     if (currentRoom && currentRoom.gameMode === 'whoami') {
       handleWhoamiMsg(currentRoom, playerId, msg);
+    }
+
+    if (currentRoom && currentRoom.gameMode === 'monopoly') {
+      handleMonopolyMsg(currentRoom, playerId, msg);
     }
   });
 
@@ -1158,7 +1315,10 @@ function handleSpyfallMsg(room, playerId, msg) {
   if (msg.type === 'update-settings') {
     if (playerId !== room.hostId) return;
     const roundDuration = Math.max(60, Math.min(900, parseInt(msg.roundDuration, 10) || 480));
-    room.settings = { roundDuration };
+    let locationCount = parseInt(msg.locationCount, 10);
+    if (![20, 25, 30, 35].includes(locationCount)) locationCount = 30;
+    locationCount = Math.min(locationCount, spyfallLocations.length);
+    room.settings = { roundDuration, locationCount };
     clearTimer(room);
     room.game = createSpyfallGame(room.settings);
     broadcastRoom(room);
@@ -1233,9 +1393,9 @@ function handleSpyfallMsg(room, playerId, msg) {
   if (msg.type === 'spy-guess') {
     if (game.phase !== 'playing') return;
     if (playerId !== game.spyId) return;
-    const locationName = msg.locationName;
+    const guessedSlug = msg.locationSlug || msg.locationName;
     game.phase = 'finished';
-    if (locationName === game.location.name) {
+    if (guessedSlug === game.location.slug || guessedSlug === game.location.name) {
       game.winner = 'spy';
       game.winReason = 'guessed';
     } else {
@@ -1510,7 +1670,467 @@ function handleWhoamiMsg(room, playerId, msg) {
   }
 }
 
+// ============================================================
+// MONOPOLY GAME LOGIC
+// ============================================================
+
+const { TRANSPORT_RENT, JAIL_INDEX, GO_TO_JAIL_INDEX, GO_SALARY } = monopolyData;
+
+function createMonopolyGame(settings) {
+  const deckId = settings.deckId || 'classic';
+  const deck = monopolyStore.getDeck(deckId);
+  return {
+    phase: 'lobby',          // lobby | playing | finished
+    turn: null,              // rolling | jail-decision | action | ended
+    turnOrder: [],
+    turnIndex: 0,
+    currentPlayerId: null,
+    dice: null,
+    doublesCount: 0,
+    startingMoney: settings.startingMoney || 1500,
+    deckId,
+    deck,
+    playerState: {},
+    ownership: {},
+    log: [],
+    pendingBuy: null,
+    winner: null,
+    paused: false,
+    timerEnd: null,
+    timerRemaining: null,
+    teams: [],
+    scores: {},
+  };
+}
+
+function mpLog(game, text) {
+  game.log.push({ text, ts: Date.now() });
+  if (game.log.length > 30) game.log.shift();
+}
+
+function mpPlayerName(room, id) {
+  return room.players.get(id)?.name || 'Игрок';
+}
+
+function mpSquareLabel(square, deck) {
+  if (square.type === 'property') return deck.properties[square.slug]?.name || '';
+  if (square.type === 'transport') return deck.transport[square.slug]?.name || '';
+  if (square.type === 'utility') return deck.utilities[square.slug]?.name || '';
+  if (square.type === 'tax') return square.name;
+  if (square.type === 'go') return 'GO';
+  if (square.type === 'jail') return 'Тюрьма';
+  if (square.type === 'go_to_jail') return 'В тюрьму';
+  if (square.type === 'parking') return 'Парковка';
+  if (square.type === 'chance') return 'Шанс';
+  if (square.type === 'chest') return 'Казна';
+  return '';
+}
+
+function mpImageUrl(slug) {
+  if (!MONOPOLY_IMAGE_BASE || !slug) return null;
+  const sep = MONOPOLY_IMAGE_BASE.endsWith('/') ? '' : '/';
+  return `${MONOPOLY_IMAGE_BASE}${sep}${slug}.${MONOPOLY_IMAGE_EXT}`;
+}
+
+function startMonopolyGame(room) {
+  const players = [];
+  for (const [id, p] of room.players) if (p.team === 'player') players.push(id);
+  if (players.length < 2 || players.length > 8) return false;
+  const game = room.game;
+  game.turnOrder = shuffle(players);
+  game.turnIndex = 0;
+  game.currentPlayerId = game.turnOrder[0];
+  game.playerState = {};
+  for (const id of game.turnOrder) {
+    game.playerState[id] = {
+      money: game.startingMoney, position: 0,
+      inJail: false, jailTurns: 0, bankrupt: false,
+    };
+  }
+  game.ownership = {};
+  game.log = [];
+  game.dice = null;
+  game.doublesCount = 0;
+  game.phase = 'playing';
+  game.turn = 'rolling';
+  game.pendingBuy = null;
+  game.winner = null;
+  mpLog(game, `Игра началась: ${game.turnOrder.length} игроков, каждому по ${game.startingMoney}`);
+  return true;
+}
+
+function mpRollDice(room, playerId) {
+  const game = room.game;
+  if (game.phase !== 'playing') return;
+  if (playerId !== game.currentPlayerId) return;
+  const ps = game.playerState[playerId];
+  if (!ps || ps.bankrupt) return;
+  if (game.turn !== 'rolling' && game.turn !== 'jail-decision') return;
+
+  const d1 = 1 + Math.floor(Math.random() * 6);
+  const d2 = 1 + Math.floor(Math.random() * 6);
+  const isDouble = d1 === d2;
+  game.dice = [d1, d2];
+  const playerName = mpPlayerName(room, playerId);
+
+  if (ps.inJail) {
+    if (isDouble) {
+      ps.inJail = false;
+      ps.jailTurns = 0;
+      mpLog(game, `${playerName} выбросил дубль ${d1}-${d2} — выход из тюрьмы`);
+      mpAdvance(room, playerId, d1 + d2);
+      // Jail-escape doesn't give bonus turn — doublesCount not incremented
+    } else {
+      ps.jailTurns += 1;
+      mpLog(game, `${playerName} выбросил ${d1}-${d2} — остаётся в тюрьме`);
+      if (ps.jailTurns >= 3) {
+        if (ps.money >= 50) {
+          ps.money -= 50;
+          ps.inJail = false;
+          ps.jailTurns = 0;
+          mpLog(game, `${playerName} платит 50 за выход и двигается на ${d1 + d2}`);
+          mpAdvance(room, playerId, d1 + d2);
+        } else {
+          mpLog(game, `${playerName} не может заплатить 50 — банкрот`);
+          mpBankrupt(room, playerId, null);
+          // mpBankrupt auto-advances; don't touch turn here
+        }
+      } else {
+        game.turn = 'action';
+      }
+    }
+    return;
+  }
+
+  if (isDouble) {
+    game.doublesCount += 1;
+    if (game.doublesCount >= 3) {
+      mpLog(game, `${playerName} — 3-й дубль подряд, в тюрьму!`);
+      mpSendToJail(room, playerId);
+      game.turn = 'action';
+      return;
+    }
+  }
+
+  mpLog(game, `${playerName} бросает ${d1}+${d2}`);
+  mpAdvance(room, playerId, d1 + d2);
+}
+
+function mpAdvance(room, playerId, steps) {
+  const game = room.game;
+  const ps = game.playerState[playerId];
+  const newPos = (ps.position + steps) % 40;
+  if (newPos < ps.position || steps >= 40) {
+    ps.money += GO_SALARY;
+    mpLog(game, `${mpPlayerName(room, playerId)} проходит GO, +${GO_SALARY}`);
+  }
+  ps.position = newPos;
+  mpResolveSquare(room, playerId);
+}
+
+function mpResolveSquare(room, playerId) {
+  const game = room.game;
+  const deck = game.deck;
+  const ps = game.playerState[playerId];
+  const square = deck.board[ps.position];
+  const playerName = mpPlayerName(room, playerId);
+
+  if (square.type === 'property' || square.type === 'transport' || square.type === 'utility') {
+    const slug = square.slug;
+    const info = square.type === 'property' ? deck.properties[slug]
+      : square.type === 'transport' ? deck.transport[slug]
+      : deck.utilities[slug];
+    const ownerId = game.ownership[slug];
+    if (!ownerId) {
+      game.pendingBuy = { slug, type: square.type, price: info.price, name: info.name };
+      mpLog(game, `${playerName} на «${info.name}» — свободно, цена ${info.price}`);
+    } else if (ownerId === playerId) {
+      mpLog(game, `${playerName} на своей «${info.name}»`);
+    } else {
+      const rent = mpComputeRent(game, square, slug, ownerId);
+      mpCharge(room, playerId, ownerId, rent, info.name);
+    }
+  } else if (square.type === 'tax') {
+    mpCharge(room, playerId, null, square.amount, square.name);
+  } else if (square.type === 'go_to_jail') {
+    mpLog(game, `${playerName} отправляется в тюрьму`);
+    mpSendToJail(room, playerId);
+  } else if (square.type === 'chance' || square.type === 'chest') {
+    mpLog(game, `${playerName} на клетке «${square.type === 'chance' ? 'Шанс' : 'Казна'}» (без эффекта)`);
+  }
+
+  // Only set action if bankruptcy/jail didn't already advance the turn
+  if (game.phase === 'playing' && playerId === game.currentPlayerId && !ps.bankrupt) {
+    game.turn = 'action';
+  }
+}
+
+function mpComputeRent(game, square, slug, ownerId) {
+  const deck = game.deck;
+  if (square.type === 'property') {
+    const prop = deck.properties[slug];
+    const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
+    const ownsAll = groupSlugs.every((s) => game.ownership[s] === ownerId);
+    return ownsAll ? prop.rent[0] * 2 : prop.rent[0];
+  }
+  if (square.type === 'transport') {
+    const owned = Object.keys(deck.transport).filter((s) => game.ownership[s] === ownerId).length;
+    return TRANSPORT_RENT[Math.max(0, owned - 1)] || 0;
+  }
+  if (square.type === 'utility') {
+    const owned = Object.keys(deck.utilities).filter((s) => game.ownership[s] === ownerId).length;
+    const diceSum = (game.dice?.[0] || 0) + (game.dice?.[1] || 0);
+    return (owned === 2 ? 10 : 4) * diceSum;
+  }
+  return 0;
+}
+
+function mpCharge(room, fromId, toId, amount, label) {
+  const game = room.game;
+  const ps = game.playerState[fromId];
+  const fromName = mpPlayerName(room, fromId);
+  const toName = toId ? mpPlayerName(room, toId) : 'банку';
+  if (ps.money < amount) {
+    const paid = ps.money;
+    if (toId) game.playerState[toId].money += paid;
+    mpLog(game, `${fromName} не может заплатить ${amount} (${label}) — банкрот, ${toName} получает ${paid}`);
+    mpBankrupt(room, fromId, toId);
+    return;
+  }
+  ps.money -= amount;
+  if (toId) game.playerState[toId].money += amount;
+  mpLog(game, `${fromName} платит ${amount} → ${toName} за «${label}»`);
+}
+
+function mpBankrupt(room, playerId, creditorId) {
+  const game = room.game;
+  const ps = game.playerState[playerId];
+  ps.bankrupt = true;
+  ps.money = 0;
+  for (const slug of Object.keys(game.ownership)) {
+    if (game.ownership[slug] === playerId) {
+      if (creditorId) game.ownership[slug] = creditorId;
+      else delete game.ownership[slug];
+    }
+  }
+  mpLog(game, `💀 ${mpPlayerName(room, playerId)} — БАНКРОТ`);
+  mpCheckWin(room);
+  if (game.phase === 'playing' && playerId === game.currentPlayerId) {
+    mpAdvanceToNextPlayer(room);
+  }
+}
+
+function mpAdvanceToNextPlayer(room) {
+  const game = room.game;
+  game.doublesCount = 0;
+  game.dice = null;
+  game.pendingBuy = null;
+  const alive = game.turnOrder.filter((id) => !game.playerState[id].bankrupt);
+  if (alive.length <= 1) { mpCheckWin(room); return; }
+  do {
+    game.turnIndex = (game.turnIndex + 1) % game.turnOrder.length;
+  } while (game.playerState[game.turnOrder[game.turnIndex]].bankrupt);
+  game.currentPlayerId = game.turnOrder[game.turnIndex];
+  const nextPs = game.playerState[game.currentPlayerId];
+  game.turn = nextPs.inJail ? 'jail-decision' : 'rolling';
+}
+
+function mpSendToJail(room, playerId) {
+  const ps = room.game.playerState[playerId];
+  ps.position = JAIL_INDEX;
+  ps.inJail = true;
+  ps.jailTurns = 0;
+  room.game.doublesCount = 0;
+}
+
+function mpBuy(room, playerId) {
+  const game = room.game;
+  if (game.phase !== 'playing' || playerId !== game.currentPlayerId) return;
+  if (!game.pendingBuy) return;
+  const ps = game.playerState[playerId];
+  const { slug, price, name } = game.pendingBuy;
+  if (ps.money < price) return;
+  ps.money -= price;
+  game.ownership[slug] = playerId;
+  mpLog(game, `${mpPlayerName(room, playerId)} покупает «${name}» за ${price}`);
+  game.pendingBuy = null;
+}
+
+function mpSkipBuy(room, playerId) {
+  const game = room.game;
+  if (playerId !== game.currentPlayerId || !game.pendingBuy) return;
+  mpLog(game, `${mpPlayerName(room, playerId)} отказывается от «${game.pendingBuy.name}»`);
+  game.pendingBuy = null;
+}
+
+function mpEndTurn(room, playerId) {
+  const game = room.game;
+  if (game.phase !== 'playing' || playerId !== game.currentPlayerId) return;
+  if (game.pendingBuy) return;
+
+  const ps = game.playerState[playerId];
+  const rolledDouble = game.dice && game.dice[0] === game.dice[1] && game.doublesCount > 0 && game.doublesCount < 3;
+
+  if (rolledDouble && !ps.inJail && !ps.bankrupt) {
+    game.dice = null;
+    game.turn = 'rolling';
+    return;
+  }
+
+  mpAdvanceToNextPlayer(room);
+}
+
+function mpPayJail(room, playerId) {
+  const game = room.game;
+  if (playerId !== game.currentPlayerId || game.turn !== 'jail-decision') return;
+  const ps = game.playerState[playerId];
+  if (!ps.inJail || ps.money < 50) return;
+  ps.money -= 50;
+  ps.inJail = false;
+  ps.jailTurns = 0;
+  game.turn = 'rolling';
+  mpLog(game, `${mpPlayerName(room, playerId)} платит 50 — вышел из тюрьмы`);
+}
+
+function mpCheckWin(room) {
+  const game = room.game;
+  const alive = game.turnOrder.filter((id) => !game.playerState[id].bankrupt);
+  if (alive.length === 1) {
+    game.winner = alive[0];
+    game.phase = 'finished';
+    mpLog(game, `🏆 ${mpPlayerName(room, alive[0])} — победитель!`);
+  }
+}
+
+function mpLogoUrl(game, info) {
+  if (!info) return null;
+  if (info.logoId) {
+    const store = monopolyStore.getState();
+    const logo = store?.logos?.[info.logoId];
+    if (logo?.url) return logo.url;
+  }
+  if (info.logoUrl) return info.logoUrl;
+  return mpImageUrl(info.slug || info.key || null);
+}
+
+function mpSerializeBoard(game) {
+  const deck = game.deck;
+  return deck.board.map((sq, i) => {
+    const out = { index: i, type: sq.type };
+    if (sq.slug) {
+      out.slug = sq.slug;
+      const info = sq.type === 'property' ? deck.properties[sq.slug]
+        : sq.type === 'transport' ? deck.transport[sq.slug]
+        : sq.type === 'utility' ? deck.utilities[sq.slug]
+        : null;
+      if (info) {
+        out.name = info.name;
+        out.price = info.price;
+        if (sq.type === 'property') {
+          out.group = info.group;
+          out.color = deck.groups[info.group]?.color || '#888';
+          out.rent = info.rent;
+        }
+        out.image = mpLogoUrl(game, info);
+      }
+    } else {
+      out.name = mpSquareLabel(sq, deck);
+      if (sq.type === 'tax') out.amount = sq.amount;
+    }
+    return out;
+  });
+}
+
+function getMonopolyState(room, playerId) {
+  const game = room.game;
+  return {
+    mpPhase: game.phase,
+    mpTurn: game.turn,
+    currentPlayerId: game.currentPlayerId,
+    dice: game.dice,
+    doublesCount: game.doublesCount,
+    playerState: game.playerState,
+    ownership: game.ownership,
+    pendingBuy: playerId === game.currentPlayerId ? game.pendingBuy : null,
+    log: game.log.slice(-20),
+    turnOrder: game.turnOrder,
+    winner: game.winner,
+    board: mpSerializeBoard(game),
+    groups: game.deck.groups,
+    deckId: game.deckId,
+    deckName: game.deck.name,
+    startingMoney: game.startingMoney,
+  };
+}
+
+function handleMonopolyMsg(room, playerId, msg) {
+  const game = room.game;
+
+  if (msg.type === 'update-settings') {
+    if (playerId !== room.hostId) return;
+    const startingMoney = Math.max(500, Math.min(5000, parseInt(msg.startingMoney, 10) || 1500));
+    const deckId = (msg.deckId || 'classic').toString();
+    room.settings = { startingMoney, deckId };
+    room.game = createMonopolyGame(room.settings);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'start-game') {
+    if (playerId !== room.hostId) return;
+    if (game.phase !== 'lobby') return;
+    if (!startMonopolyGame(room)) return;
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'roll-dice') {
+    mpRollDice(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'buy-property') {
+    mpBuy(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'skip-buy') {
+    mpSkipBuy(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'end-turn') {
+    mpEndTurn(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'pay-jail') {
+    mpPayJail(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'new-game') {
+    if (playerId !== room.hostId) return;
+    room.game = createMonopolyGame(room.settings);
+    broadcastRoom(room);
+    return;
+  }
+}
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Game server running on port ${PORT}`);
+
+monopolyStore.init().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Game server running on port ${PORT}`);
+  });
+}).catch((err) => {
+  console.error('Failed to init monopoly store:', err);
+  server.listen(PORT, () => {
+    console.log(`Game server running on port ${PORT} (store unavailable)`);
+  });
 });

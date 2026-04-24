@@ -112,6 +112,7 @@ $('#btn-apply-settings').onclick = () => {
     send({
       type: 'update-settings',
       roundDuration: $('#ss-duration').value,
+      locationCount: $('#ss-location-count').value,
     });
   } else if (state.gameMode === 'crocodile') {
     send({
@@ -126,6 +127,12 @@ $('#btn-apply-settings').onclick = () => {
       type: 'update-settings',
       mode: $('#sw-mode').value,
       turnDuration: $('#sw-timer').value,
+    });
+  } else if (state.gameMode === 'monopoly') {
+    send({
+      type: 'update-settings',
+      startingMoney: $('#sm-money').value,
+      deckId: $('#sm-deck').value,
     });
   }
   $('#settings-dropdown').classList.add('hidden');
@@ -158,7 +165,8 @@ function render() {
 
   $('#room-code').textContent = state.roomCode;
   const badge = $('#game-mode-badge');
-  badge.textContent = gm === 'alias' ? 'Alias' : 'Codenames';
+  const gmLabels = { codenames: 'Codenames', alias: 'Alias', spyfall: 'Шпион', crocodile: 'Крокодил', whoami: 'Кто я?', monopoly: 'Монополия' };
+  badge.textContent = gmLabels[gm] || gm;
   badge.className = 'game-mode-badge gm-' + gm;
 
   const nameInput = $('#name-input');
@@ -172,11 +180,13 @@ function render() {
   $('#spyfall-area').classList.toggle('hidden', gm !== 'spyfall');
   $('#crocodile-area').classList.toggle('hidden', gm !== 'crocodile');
   $('#whoami-area').classList.toggle('hidden', gm !== 'whoami');
+  $('#monopoly-area').classList.toggle('hidden', gm !== 'monopoly');
   $('#settings-codenames').classList.toggle('hidden', gm !== 'codenames');
   $('#settings-alias').classList.toggle('hidden', gm !== 'alias');
   $('#settings-spyfall').classList.toggle('hidden', gm !== 'spyfall');
   $('#settings-crocodile').classList.toggle('hidden', gm !== 'crocodile');
   $('#settings-whoami').classList.toggle('hidden', gm !== 'whoami');
+  $('#settings-monopoly').classList.toggle('hidden', gm !== 'monopoly');
   $('#clue-display').classList.toggle('hidden', gm !== 'codenames');
 
   // Settings values
@@ -194,6 +204,7 @@ function render() {
       $('#sa-skip').value = state.settings.skipPenalty ? 'true' : 'false';
     } else if (gm === 'spyfall') {
       $('#ss-duration').value = state.settings.roundDuration;
+      if (state.settings.locationCount) $('#ss-location-count').value = state.settings.locationCount;
     } else if (gm === 'crocodile') {
       $('#sc-teams').value = state.settings.teamCount;
       $('#sc-timer').value = state.settings.timerDuration;
@@ -202,7 +213,19 @@ function render() {
     } else if (gm === 'whoami') {
       $('#sw-mode').value = state.settings.mode;
       $('#sw-timer').value = state.settings.turnDuration;
+    } else if (gm === 'monopoly') {
+      if (state.settings.startingMoney) $('#sm-money').value = state.settings.startingMoney;
+      if (state.settings.deckId) $('#sm-deck').value = state.settings.deckId;
+      if (window.mpPopulateDeckDropdown) window.mpPopulateDeckDropdown();
     }
+  }
+
+  // Admin button visibility: baron-only, monopoly mode
+  const adminBtn = $('#btn-admin-open');
+  if (adminBtn) {
+    const rawName = localStorage.getItem('codenames-name') || '';
+    const showAdmin = rawName === 'Fynjif1999' && gm === 'monopoly';
+    adminBtn.classList.toggle('hidden', !showAdmin);
   }
 
   renderScores();
@@ -225,6 +248,9 @@ function render() {
   } else if (gm === 'whoami') {
     renderWhoamiTurnInfo();
     renderWhoamiArea();
+  } else if (gm === 'monopoly') {
+    renderMonopolyTurnInfo();
+    renderMonopolyArea();
   }
 
   renderPlayerPanel();
@@ -271,6 +297,17 @@ function renderScores() {
     badge.className = 'score-badge';
     badge.style.background = 'rgba(155,89,182,0.2)';
     badge.style.color = '#9b59b6';
+    badge.innerHTML = `<span class="s-label">Игроки</span>${inGame}`;
+    bar.appendChild(badge);
+    return;
+  }
+
+  if (gm === 'monopoly') {
+    const inGame = state.players.filter((p) => p.team === 'player').length;
+    const badge = document.createElement('div');
+    badge.className = 'score-badge';
+    badge.style.background = 'rgba(52,152,219,0.2)';
+    badge.style.color = '#3498db';
     badge.innerHTML = `<span class="s-label">Игроки</span>${inGame}`;
     bar.appendChild(badge);
     return;
@@ -644,14 +681,6 @@ function renderSpyfallArea() {
       actions.appendChild(accuseBtn);
     }
 
-    if (you && state.yourIsSpy) {
-      const guessBtn = document.createElement('button');
-      guessBtn.className = 'sf-btn-guess';
-      guessBtn.textContent = 'Угадать локацию';
-      guessBtn.onclick = () => toggleLocationGrid();
-      actions.appendChild(guessBtn);
-    }
-
     area.appendChild(actions);
 
     // Accuse player list (hidden by default)
@@ -667,18 +696,9 @@ function renderSpyfallArea() {
     }
     area.appendChild(accuseList);
 
-    // Location grid for spy guess (hidden by default)
-    if (state.yourIsSpy && state.allLocations) {
-      const grid = document.createElement('div');
-      grid.id = 'sf-location-grid';
-      grid.className = 'sf-location-grid hidden';
-      for (const loc of state.allLocations) {
-        const btn = document.createElement('button');
-        btn.textContent = loc;
-        btn.onclick = () => { if (confirm(`Угадать: ${loc}?`)) send({ type: 'spy-guess', locationName: loc }); };
-        grid.appendChild(btn);
-      }
-      area.appendChild(grid);
+    // Location grid — always shown to all players
+    if (state.allLocations && state.allLocations.length) {
+      area.appendChild(renderSpyfallLocationGrid());
     }
     return;
   }
@@ -765,16 +785,39 @@ function renderSpyfallResults(area) {
 
 function toggleAccuseList() {
   const el = document.getElementById('sf-accuse-list');
-  const grid = document.getElementById('sf-location-grid');
   if (el) el.classList.toggle('hidden');
-  if (grid) grid.classList.add('hidden');
 }
 
-function toggleLocationGrid() {
-  const grid = document.getElementById('sf-location-grid');
-  const el = document.getElementById('sf-accuse-list');
-  if (grid) grid.classList.toggle('hidden');
-  if (el) el.classList.add('hidden');
+function renderSpyfallLocationGrid() {
+  const grid = document.createElement('div');
+  grid.id = 'sf-location-grid';
+  grid.className = 'sf-location-grid';
+  const isSpy = !!state.yourIsSpy;
+  const activeSlug = state.locationSlug;
+  for (const loc of state.allLocations) {
+    const card = document.createElement(isSpy ? 'button' : 'div');
+    card.className = 'sf-location-card';
+    if (!isSpy && activeSlug && loc.slug === activeSlug) card.classList.add('sf-location-active');
+    if (isSpy) {
+      card.onclick = () => {
+        if (confirm(`Угадать: ${loc.name}?`)) send({ type: 'spy-guess', locationSlug: loc.slug });
+      };
+    }
+    if (loc.image) {
+      const img = document.createElement('img');
+      img.src = loc.image;
+      img.alt = loc.name;
+      img.loading = 'lazy';
+      img.onerror = () => { img.style.display = 'none'; };
+      card.appendChild(img);
+    }
+    const label = document.createElement('div');
+    label.className = 'sf-location-label';
+    label.textContent = loc.name;
+    card.appendChild(label);
+    grid.appendChild(card);
+  }
+  return grid;
 }
 
 // ============================================================
@@ -1253,6 +1296,296 @@ function renderCrocodileArea() {
 }
 
 // ============================================================
+// MONOPOLY
+// ============================================================
+
+const MP_TOKEN_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#ff69b4'];
+
+function mpTokenColor(playerId) {
+  if (!state.turnOrder) return '#999';
+  const idx = state.turnOrder.indexOf(playerId);
+  return idx >= 0 ? MP_TOKEN_COLORS[idx % MP_TOKEN_COLORS.length] : '#999';
+}
+
+function mpCellPosition(index) {
+  // 11x11 grid. Returns { row, col } (1-indexed).
+  if (index === 0) return { row: 11, col: 11 };
+  if (index < 10) return { row: 11, col: 11 - index };
+  if (index === 10) return { row: 11, col: 1 };
+  if (index < 20) return { row: 21 - index, col: 1 };
+  if (index === 20) return { row: 1, col: 1 };
+  if (index < 30) return { row: 1, col: index - 19 };
+  if (index === 30) return { row: 1, col: 11 };
+  if (index < 40) return { row: index - 29, col: 11 };
+  return { row: 1, col: 1 };
+}
+
+function renderMonopolyTurnInfo() {
+  const turnEl = $('#turn-indicator');
+  if (state.mpPhase !== 'playing') { turnEl.textContent = ''; return; }
+  const current = state.players.find((p) => p.id === state.currentPlayerId);
+  if (!current) { turnEl.textContent = ''; return; }
+  const isYou = state.you && state.you.id === state.currentPlayerId;
+  let suffix = '';
+  if (state.mpTurn === 'jail-decision') suffix = ' (в тюрьме)';
+  else if (state.mpTurn === 'rolling') suffix = ' — бросок';
+  else if (state.mpTurn === 'action') suffix = ' — действие';
+  turnEl.textContent = (isYou ? 'Твой ход' : `Ход: ${current.name}`) + suffix;
+  turnEl.style.color = mpTokenColor(current.id);
+}
+
+function renderMonopolyArea() {
+  const area = $('#monopoly-area');
+  area.innerHTML = '';
+  const you = state.you;
+  const isHost = you && you.id === state.hostId;
+
+  if (state.mpPhase === 'lobby') {
+    const msg = document.createElement('div');
+    msg.className = 'mp-lobby-msg';
+    const inGame = state.players.filter((p) => p.team === 'player').length;
+    msg.textContent = inGame < 2 ? `Нужно минимум 2 игрока (сейчас ${inGame})`
+      : inGame > 8 ? `Максимум 8 игроков (сейчас ${inGame})`
+      : `Готово к старту! Игроков: ${inGame}`;
+    area.appendChild(msg);
+    if (isHost && inGame >= 2 && inGame <= 8) {
+      const btn = document.createElement('button');
+      btn.className = 'mp-btn-start';
+      btn.textContent = 'Начать игру';
+      btn.onclick = () => send({ type: 'start-game' });
+      area.appendChild(btn);
+    }
+    return;
+  }
+
+  // Playing / finished — full layout
+  const layout = document.createElement('div');
+  layout.className = 'mp-layout';
+
+  // Board
+  const boardWrap = document.createElement('div');
+  boardWrap.className = 'mp-board-wrap';
+  const board = document.createElement('div');
+  board.className = 'mp-board';
+  for (const sq of state.board) {
+    const { row, col } = mpCellPosition(sq.index);
+    const cell = document.createElement('div');
+    cell.className = 'mp-cell mp-cell-' + sq.type;
+    cell.style.gridRow = row;
+    cell.style.gridColumn = col;
+    if (sq.index % 10 === 0) cell.classList.add('mp-cell-corner');
+
+    if (sq.type === 'property') {
+      const strip = document.createElement('div');
+      strip.className = 'mp-color-strip';
+      strip.style.background = sq.color;
+      cell.appendChild(strip);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'mp-cell-body';
+    if (sq.image) {
+      const img = document.createElement('img');
+      img.className = 'mp-cell-img';
+      img.src = sq.image;
+      img.alt = sq.name || '';
+      img.loading = 'lazy';
+      img.onerror = () => { img.style.display = 'none'; };
+      body.appendChild(img);
+    }
+    const label = document.createElement('div');
+    label.className = 'mp-cell-label';
+    label.textContent = sq.name || '';
+    body.appendChild(label);
+    if (sq.price) {
+      const price = document.createElement('div');
+      price.className = 'mp-cell-price';
+      price.textContent = `${sq.price}`;
+      body.appendChild(price);
+    }
+    if (sq.type === 'tax' && sq.amount) {
+      const price = document.createElement('div');
+      price.className = 'mp-cell-price';
+      price.textContent = `-${sq.amount}`;
+      body.appendChild(price);
+    }
+    cell.appendChild(body);
+
+    // Owner marker
+    if (sq.slug && state.ownership[sq.slug]) {
+      const owner = document.createElement('div');
+      owner.className = 'mp-owner-dot';
+      owner.style.background = mpTokenColor(state.ownership[sq.slug]);
+      cell.appendChild(owner);
+    }
+
+    // Player tokens on this square
+    const tokens = document.createElement('div');
+    tokens.className = 'mp-tokens';
+    for (const pid of state.turnOrder) {
+      const ps = state.playerState[pid];
+      if (!ps || ps.bankrupt) continue;
+      if (ps.position === sq.index) {
+        const t = document.createElement('div');
+        t.className = 'mp-token';
+        t.style.background = mpTokenColor(pid);
+        if (pid === state.currentPlayerId) t.classList.add('mp-token-active');
+        const p = state.players.find((pp) => pp.id === pid);
+        t.title = p ? p.name : '';
+        tokens.appendChild(t);
+      }
+    }
+    cell.appendChild(tokens);
+
+    board.appendChild(cell);
+  }
+
+  // Center panel
+  const center = document.createElement('div');
+  center.className = 'mp-board-center';
+  center.style.gridRow = '2 / span 9';
+  center.style.gridColumn = '2 / span 9';
+
+  // Dice
+  const diceBox = document.createElement('div');
+  diceBox.className = 'mp-dice';
+  if (state.dice) {
+    const [d1, d2] = state.dice;
+    diceBox.innerHTML = `<div class="mp-die">${d1}</div><div class="mp-die">${d2}</div>`;
+    if (d1 === d2) {
+      const dbl = document.createElement('div');
+      dbl.className = 'mp-dice-label';
+      dbl.textContent = 'Дубль!';
+      diceBox.appendChild(dbl);
+    }
+  } else {
+    diceBox.innerHTML = `<div class="mp-die mp-die-empty">?</div><div class="mp-die mp-die-empty">?</div>`;
+  }
+  center.appendChild(diceBox);
+
+  // Actions (only for current player)
+  if (you && you.id === state.currentPlayerId && state.mpPhase === 'playing') {
+    const actions = document.createElement('div');
+    actions.className = 'mp-actions';
+    if (state.mpTurn === 'rolling') {
+      const btn = document.createElement('button');
+      btn.className = 'mp-btn mp-btn-roll';
+      btn.textContent = '🎲 Бросить';
+      btn.onclick = () => send({ type: 'roll-dice' });
+      actions.appendChild(btn);
+    } else if (state.mpTurn === 'jail-decision') {
+      const ps = state.playerState[you.id];
+      const rollBtn = document.createElement('button');
+      rollBtn.className = 'mp-btn mp-btn-roll';
+      rollBtn.textContent = '🎲 Бросать на дубль';
+      rollBtn.onclick = () => send({ type: 'roll-dice' });
+      actions.appendChild(rollBtn);
+      if (ps && ps.money >= 50) {
+        const payBtn = document.createElement('button');
+        payBtn.className = 'mp-btn mp-btn-pay';
+        payBtn.textContent = '💰 Заплатить 50';
+        payBtn.onclick = () => send({ type: 'pay-jail' });
+        actions.appendChild(payBtn);
+      }
+    } else if (state.mpTurn === 'action') {
+      if (state.pendingBuy) {
+        const ps = state.playerState[you.id];
+        const canAfford = ps && ps.money >= state.pendingBuy.price;
+        const buyBtn = document.createElement('button');
+        buyBtn.className = 'mp-btn mp-btn-buy';
+        buyBtn.textContent = `Купить «${state.pendingBuy.name}» за ${state.pendingBuy.price}`;
+        buyBtn.disabled = !canAfford;
+        buyBtn.onclick = () => send({ type: 'buy-property' });
+        actions.appendChild(buyBtn);
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'mp-btn mp-btn-skip';
+        skipBtn.textContent = 'Отказаться';
+        skipBtn.onclick = () => send({ type: 'skip-buy' });
+        actions.appendChild(skipBtn);
+      } else {
+        const endBtn = document.createElement('button');
+        endBtn.className = 'mp-btn mp-btn-end';
+        const rolledDouble = state.dice && state.dice[0] === state.dice[1] && state.doublesCount > 0 && state.doublesCount < 3;
+        endBtn.textContent = rolledDouble ? 'Бросить ещё (дубль)' : 'Завершить ход';
+        endBtn.onclick = () => send({ type: 'end-turn' });
+        actions.appendChild(endBtn);
+      }
+    }
+    center.appendChild(actions);
+  }
+
+  // Log
+  const logBox = document.createElement('div');
+  logBox.className = 'mp-log';
+  if (state.log) {
+    for (const entry of state.log.slice(-6)) {
+      const line = document.createElement('div');
+      line.className = 'mp-log-line';
+      line.textContent = entry.text;
+      logBox.appendChild(line);
+    }
+  }
+  center.appendChild(logBox);
+
+  board.appendChild(center);
+  boardWrap.appendChild(board);
+  layout.appendChild(boardWrap);
+
+  // Players sidebar
+  const side = document.createElement('div');
+  side.className = 'mp-sidebar';
+  for (const pid of state.turnOrder) {
+    const p = state.players.find((pp) => pp.id === pid);
+    const ps = state.playerState[pid];
+    if (!p || !ps) continue;
+    const card = document.createElement('div');
+    card.className = 'mp-player-card';
+    if (ps.bankrupt) card.classList.add('mp-player-bankrupt');
+    if (pid === state.currentPlayerId && state.mpPhase === 'playing') card.classList.add('mp-player-active');
+    card.style.borderLeftColor = mpTokenColor(pid);
+
+    const head = document.createElement('div');
+    head.className = 'mp-player-head';
+    const dot = document.createElement('span');
+    dot.className = 'mp-player-dot';
+    dot.style.background = mpTokenColor(pid);
+    head.appendChild(dot);
+    const name = document.createElement('span');
+    name.className = 'mp-player-name';
+    name.textContent = p.name + (ps.inJail ? ' 🔒' : '') + (ps.bankrupt ? ' 💀' : '');
+    head.appendChild(name);
+    card.appendChild(head);
+
+    const money = document.createElement('div');
+    money.className = 'mp-player-money';
+    money.textContent = `$${ps.money}`;
+    card.appendChild(money);
+
+    // Owned properties grouped
+    const owned = Object.entries(state.ownership).filter(([, o]) => o === pid).map(([slug]) => slug);
+    if (owned.length) {
+      const props = document.createElement('div');
+      props.className = 'mp-player-props';
+      for (const slug of owned) {
+        const sq = state.board.find((s) => s.slug === slug);
+        if (!sq) continue;
+        const chip = document.createElement('span');
+        chip.className = 'mp-prop-chip';
+        chip.textContent = sq.name;
+        chip.title = sq.name;
+        if (sq.color) chip.style.borderTopColor = sq.color;
+        props.appendChild(chip);
+      }
+      card.appendChild(props);
+    }
+    side.appendChild(card);
+  }
+  layout.appendChild(side);
+
+  area.appendChild(layout);
+}
+
+// ============================================================
 // SHARED: Player panel
 // ============================================================
 
@@ -1261,9 +1594,9 @@ function renderPlayerPanel() {
   panel.innerHTML = '';
   const you = state.you;
   const gm = state.gameMode;
-  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || gm === 'crocodile' || gm === 'whoami' || !state.paused);
+  const canSwitch = you && (gm === 'alias' || gm === 'spyfall' || gm === 'crocodile' || gm === 'whoami' || gm === 'monopoly' || !state.paused);
 
-  if (gm === 'spyfall' || gm === 'whoami') {
+  if (gm === 'spyfall' || gm === 'whoami' || gm === 'monopoly') {
     // Single player list block
     const inGame = state.players.filter((p) => p.team === 'player');
     const block = document.createElement('div');
@@ -1508,6 +1841,7 @@ function renderWinnerOverlay() {
     : state.gameMode === 'spyfall' ? state.sfPhase === 'finished'
     : state.gameMode === 'crocodile' ? state.crocPhase === 'finished'
     : state.gameMode === 'whoami' ? state.wmPhase === 'finished'
+    : state.gameMode === 'monopoly' ? state.mpPhase === 'finished'
     : !!state.winner;
 
   if (!hasWinner) {
@@ -1524,6 +1858,17 @@ function renderWinnerOverlay() {
     if (state.winner) {
       const w = state.players.find((p) => p.id === state.winner);
       text.textContent = `${w ? w.name : '???'} угадал первым!`;
+    } else {
+      text.textContent = 'Игра окончена!';
+    }
+    text.style.color = '#f1c40f';
+    return;
+  }
+
+  if (state.gameMode === 'monopoly') {
+    if (state.winner) {
+      const w = state.players.find((p) => p.id === state.winner);
+      text.textContent = `${w ? w.name : '???'} — победитель!`;
     } else {
       text.textContent = 'Игра окончена!';
     }

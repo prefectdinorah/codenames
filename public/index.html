@@ -19,6 +19,7 @@
         <option value="spyfall">Один Шпион</option>
         <option value="crocodile">Крокодил</option>
         <option value="whoami">Кто я?</option>
+        <option value="monopoly">Монополия</option>
       </select>
       <button id="btn-create">Создать комнату</button>
       <div class="divider">или</div>
@@ -96,11 +97,27 @@
               <label>Цель <select id="sc-target"><option value="5">5</option><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option><option value="30">30</option></select></label>
               <label>Сложность <select id="sc-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
             </div>
+            <!-- Monopoly settings -->
+            <div id="settings-monopoly" class="hidden">
+              <label>Колода <select id="sm-deck"><option value="classic">Классическая</option></select></label>
+              <label>Стартовые деньги <select id="sm-money">
+                <option value="1000">1000</option>
+                <option value="1500" selected>1500</option>
+                <option value="2000">2000</option>
+                <option value="3000">3000</option>
+              </select></label>
+            </div>
             <!-- Spyfall settings -->
             <div id="settings-spyfall" class="hidden">
               <label>Раунд <select id="ss-duration">
                 <option value="240">4 мин</option><option value="360">6 мин</option>
                 <option value="480" selected>8 мин</option><option value="600">10 мин</option>
+              </select></label>
+              <label>Локаций <select id="ss-location-count">
+                <option value="20">20</option>
+                <option value="25">25</option>
+                <option value="30" selected>30</option>
+                <option value="35">35</option>
               </select></label>
             </div>
             <button id="btn-apply-settings">Применить</button>
@@ -136,6 +153,9 @@
     <!-- Whoami area -->
     <div id="whoami-area" class="whoami-center hidden"></div>
 
+    <!-- Monopoly area -->
+    <div id="monopoly-area" class="monopoly-center hidden"></div>
+
     <!-- Player panel -->
     <div id="player-panel" class="player-panel"></div>
 
@@ -152,8 +172,29 @@
       <div id="winner-text" class="winner-text"></div>
       <button id="btn-new-game-win">Новая игра</button>
     </div>
+
+    <!-- Admin button (baron-only, visible when monopoly is selected) -->
+    <button id="btn-admin-open" class="btn-admin-open hidden">&#9881; Редактор</button>
+
+    <!-- Admin overlay -->
+    <div id="admin-overlay" class="admin-overlay hidden">
+      <div class="admin-panel">
+        <header class="admin-header">
+          <h2 id="admin-title">Редактор Монополии</h2>
+          <nav class="admin-tabs">
+            <button class="admin-tab-btn active" data-tab="decks">Колоды</button>
+            <button class="admin-tab-btn" data-tab="logos">Логотипы</button>
+          </nav>
+          <button id="btn-admin-close" class="btn-admin-close">&#10005;</button>
+        </header>
+        <div id="admin-tab-decks" class="admin-tab-body"></div>
+        <div id="admin-tab-logos" class="admin-tab-body hidden"></div>
+        <div id="admin-toast" class="admin-toast hidden"></div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
+  <script src="admin.js"></script>
 </body>
 </html>
