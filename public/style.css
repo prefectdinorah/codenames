@@ -1401,7 +1401,7 @@ body.gm-monopoly {
   background: #ebe4d4;
   color: #2a2418;
 }
-body.gm-monopoly .game-screen { background: #ebe4d4; }
+body.gm-monopoly .game-screen { background: #ebe4d4; max-width: none; padding: 0; }
 body.gm-monopoly .top-bar {
   background: #f4eede;
   color: #2a2418;
@@ -1542,7 +1542,7 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   container-name: brd;
 }
 .mp-board {
-  --mp-board-size: min(90vmin, 1280px, 100cqw);
+  --mp-board-size: min(94vmin, 1400px, 100cqw);
   --mp-corner-size: calc(var(--mp-board-size) * 0.13);
   --mp-cell-size: calc((var(--mp-board-size) - var(--mp-corner-size) * 2) / 9);
   --mp-tab-h: 20px;
