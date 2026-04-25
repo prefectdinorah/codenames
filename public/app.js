@@ -1544,7 +1544,7 @@ function mpBuildLeftAside() {
       if (!isPlaying && !youInSlot && you) {
         const joinBtn = document.createElement('button');
         joinBtn.className = 'mp-slot-join';
-        joinBtn.textContent = 'Занять место';
+        joinBtn.textContent = 'Занять';
         joinBtn.onclick = () => send({ type: 'pick-team', team: 'player' });
         emptyMain.appendChild(joinBtn);
       } else if (!isPlaying) {
