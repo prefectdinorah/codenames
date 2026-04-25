@@ -1537,14 +1537,16 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   width: 100%;
   display: flex;
   justify-content: center;
+  min-width: 0;
 }
 .mp-board {
-  --mp-board-size: min(82vmin, 820px);
+  --mp-board-size: min(82vmin, 920px, 100%);
   --mp-corner-size: calc(var(--mp-board-size) * 0.13);
   --mp-cell-size: calc((var(--mp-board-size) - var(--mp-corner-size) * 2) / 9);
-  --mp-tab-h: 14px;
+  --mp-tab-h: 17px;
   width: var(--mp-board-size);
-  height: var(--mp-board-size);
+  aspect-ratio: 1 / 1;
+  height: auto;
   display: grid;
   grid-template-columns: var(--mp-corner-size) repeat(9, var(--mp-cell-size)) var(--mp-corner-size);
   grid-template-rows: var(--mp-corner-size) repeat(9, var(--mp-cell-size)) var(--mp-corner-size);
@@ -1678,9 +1680,9 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   font-family: var(--mp-mono);
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--mp-ink);
   line-height: 1;
@@ -1691,10 +1693,10 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   border-color: var(--mp-tab-color);
 }
 .mp-tile-tab .mp-tab-cur {
-  font-size: 7px;
+  font-size: 9px;
   position: relative;
   top: -0.5px;
-  opacity: 0.7;
+  opacity: 0.75;
 }
 .mp-tile-tab[data-group] .mp-tab-cur { color: rgba(255,255,255,0.75); }
 
@@ -1973,37 +1975,38 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   .mp-brand { font-size: 26px; }
 }
 
-/* ─── New 3-column layout ────────────────────────────────── */
+/* ─── 3-column layout ────────────────────────────────────── */
 .mp-page-grid {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 280px;
-  gap: 0;
+  grid-template-columns: 280px minmax(0, 1fr) 320px;
+  gap: 14px;
   align-items: stretch;
-  max-width: 1480px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
+  padding: 14px;
+  box-sizing: border-box;
 }
 .mp-aside-left, .mp-aside-right {
   background: var(--mp-panel-bg);
   border: 0.5px solid var(--mp-hairline);
-  border-radius: 0;
-  padding: 18px 14px;
+  border-radius: 8px;
+  padding: 18px 16px;
   display: flex;
   flex-direction: column;
   gap: 24px;
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 160px);
   overflow-y: auto;
   overflow-x: hidden;
   font-family: var(--mp-ui);
   min-width: 0;
 }
-.mp-aside-left { border-right: 0; }
-.mp-aside-right { border-left: 0; }
 .mp-board-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  padding: 16px 12px 24px;
+  gap: 14px;
+  padding: 8px 0 16px;
+  min-width: 0;
 }
 
 .mp-aside-h {
@@ -2230,7 +2233,10 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(42, 36, 24, 0.06);
   font-family: var(--mp-ui);
-  margin-top: 8px;
+  margin: 8px auto 0;
+  max-width: 600px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .mp-action-status {
   display: flex;
