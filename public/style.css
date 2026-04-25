@@ -1538,15 +1538,16 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   display: flex;
   justify-content: center;
   min-width: 0;
+  container-type: inline-size;
+  container-name: brd;
 }
 .mp-board {
-  --mp-board-size: min(82vmin, 920px, 100%);
+  --mp-board-size: min(86vmin, 1080px, 100cqw);
   --mp-corner-size: calc(var(--mp-board-size) * 0.13);
   --mp-cell-size: calc((var(--mp-board-size) - var(--mp-corner-size) * 2) / 9);
-  --mp-tab-h: 17px;
+  --mp-tab-h: 18px;
   width: var(--mp-board-size);
-  aspect-ratio: 1 / 1;
-  height: auto;
+  height: var(--mp-board-size);
   display: grid;
   grid-template-columns: var(--mp-corner-size) repeat(9, var(--mp-cell-size)) var(--mp-corner-size);
   grid-template-rows: var(--mp-corner-size) repeat(9, var(--mp-cell-size)) var(--mp-corner-size);
@@ -1978,13 +1979,16 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 /* ─── 3-column layout ────────────────────────────────────── */
 .mp-page-grid {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 320px;
-  gap: 14px;
+  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  gap: 12px;
   align-items: stretch;
   max-width: none;
   margin: 0;
-  padding: 14px;
+  padding: 10px 12px;
   box-sizing: border-box;
+}
+@media (min-width: 1700px) {
+  .mp-page-grid { grid-template-columns: 300px minmax(0, 1fr) 340px; padding: 14px 18px; gap: 16px; }
 }
 .mp-aside-left, .mp-aside-right {
   background: var(--mp-panel-bg);
