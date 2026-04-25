@@ -174,6 +174,9 @@ function render() {
 
   $$('.host-only').forEach((el) => el.classList.toggle('hidden', !isHost));
 
+  // Body class for game-mode-specific theming
+  document.body.classList.toggle('gm-monopoly', gm === 'monopoly');
+
   // Toggle game areas
   $('#codenames-area').classList.toggle('hidden', gm !== 'codenames');
   $('#alias-area').classList.toggle('hidden', gm !== 'alias');
@@ -1371,6 +1374,39 @@ function mpTokenLetter(name) {
   return (name || '?').trim().charAt(0).toUpperCase();
 }
 
+// Currently-selected tile (persists across renders)
+let mpSelectedTile = null;
+
+function mpDieDots(value) {
+  const positions = {
+    1: [[10, 10]],
+    2: [[5, 5], [15, 15]],
+    3: [[5, 5], [10, 10], [15, 15]],
+    4: [[5, 5], [15, 5], [5, 15], [15, 15]],
+    5: [[5, 5], [15, 5], [10, 10], [5, 15], [15, 15]],
+    6: [[5, 5], [15, 5], [5, 10], [15, 10], [5, 15], [15, 15]],
+  };
+  const dots = positions[value] || [];
+  const svg = `<svg class="mp-die-svg${value ? '' : ' is-empty'}" viewBox="0 0 20 20">${dots.map(([cx, cy]) => `<circle cx="${cx}" cy="${cy}" r="1.6"/>`).join('')}</svg>`;
+  return svg;
+}
+
+function mpFormatTime(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function mpFindTileByIndex(idx) {
+  return state.board.find((s) => s.index === idx);
+}
+
+function mpCountHoldings(playerId) {
+  let n = 0;
+  for (const o of Object.values(state.ownership)) if (o === playerId) n++;
+  return n;
+}
+
 function renderMonopolyTurnInfo() {
   const turnEl = $('#turn-indicator');
   if (state.mpPhase !== 'playing') { turnEl.textContent = ''; return; }
@@ -1409,32 +1445,359 @@ function renderMonopolyArea() {
     return;
   }
 
-  const layout = document.createElement('div');
-  layout.className = 'mp-layout';
+  // Default selected tile = current player's position (or selected one)
+  if (mpSelectedTile == null) {
+    const ps = state.playerState[state.currentPlayerId];
+    mpSelectedTile = ps ? ps.position : 0;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'mp-page-grid';
+  grid.appendChild(mpBuildLeftAside());
+  grid.appendChild(mpBuildBoardCol(you));
+  grid.appendChild(mpBuildRightAside());
+
+  area.appendChild(grid);
+}
+
+function mpBuildLeftAside() {
+  const aside = document.createElement('div');
+  aside.className = 'mp-aside-left';
+
+  // Players section
+  const playersSection = document.createElement('div');
+  const h1 = document.createElement('div');
+  h1.className = 'mp-aside-h';
+  h1.textContent = 'Игроки';
+  playersSection.appendChild(h1);
+
+  const counter = document.createElement('div');
+  counter.className = 'mp-aside-counter';
+  counter.textContent = `${state.turnOrder.length}/${state.turnOrder.length}`;
+  playersSection.appendChild(counter);
+
+  const rows = document.createElement('div');
+  rows.className = 'mp-player-rows';
+  const you = state.you;
+  for (const pid of state.turnOrder) {
+    const p = state.players.find((pp) => pp.id === pid);
+    const ps = state.playerState[pid];
+    if (!p || !ps) continue;
+    const row = document.createElement('div');
+    row.className = 'mp-player-row';
+    if (pid === state.currentPlayerId && state.mpPhase === 'playing') row.classList.add('is-active');
+    if (ps.bankrupt) row.classList.add('is-bankrupt');
+
+    const dot = document.createElement('div');
+    dot.className = 'mp-prow-dot';
+    dot.style.background = mpTokenColor(pid);
+    row.appendChild(dot);
+
+    const main = document.createElement('div');
+    main.className = 'mp-prow-main';
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'mp-prow-name-row';
+    const nm = document.createElement('span');
+    nm.className = 'mp-prow-name';
+    nm.textContent = p.name;
+    nameRow.appendChild(nm);
+    if (you && you.id === pid) {
+      const tag = document.createElement('span');
+      tag.className = 'mp-prow-tag';
+      tag.textContent = 'вы';
+      nameRow.appendChild(tag);
+    }
+    if (ps.inJail) {
+      const tag = document.createElement('span');
+      tag.className = 'mp-prow-tag';
+      tag.textContent = '🔒';
+      nameRow.appendChild(tag);
+    }
+    main.appendChild(nameRow);
+
+    const stats = document.createElement('div');
+    stats.className = 'mp-prow-stats';
+    const holdings = mpCountHoldings(pid);
+    stats.innerHTML = `<span class="mp-money"><span class="mp-cur">${MP_CURRENCY}</span>${ps.money.toLocaleString('ru-RU')}</span> · ${holdings} ${holdings === 1 ? 'компания' : holdings >= 2 && holdings <= 4 ? 'компании' : 'компаний'}`;
+    main.appendChild(stats);
+
+    row.appendChild(main);
+    rows.appendChild(row);
+  }
+  playersSection.appendChild(rows);
+  aside.appendChild(playersSection);
+
+  // Activity section
+  const activitySection = document.createElement('div');
+  const h2 = document.createElement('div');
+  h2.className = 'mp-aside-h';
+  h2.textContent = 'Активность';
+  activitySection.appendChild(h2);
+
+  const log = document.createElement('div');
+  log.className = 'mp-activity';
+  const recent = (state.log || []).slice(-12).reverse();
+  for (const entry of recent) {
+    const line = document.createElement('div');
+    line.className = 'mp-act-line';
+    const time = document.createElement('span');
+    time.className = 'mp-act-time';
+    time.textContent = mpFormatTime(entry.ts);
+    line.appendChild(time);
+    const text = document.createElement('span');
+    text.className = 'mp-act-text';
+    text.textContent = entry.text;
+    line.appendChild(text);
+    log.appendChild(line);
+  }
+  activitySection.appendChild(log);
+  aside.appendChild(activitySection);
+
+  return aside;
+}
+
+function mpBuildBoardCol(you) {
+  const col = document.createElement('div');
+  col.className = 'mp-board-col';
 
   const boardWrap = document.createElement('div');
   boardWrap.className = 'mp-board-wrap';
   const board = document.createElement('div');
   board.className = 'mp-board';
 
-  // Tiles
   for (const sq of state.board) {
     board.appendChild(mpBuildTile(sq));
   }
 
-  // Center: brand + dice + actions + log
-  board.appendChild(mpBuildCenter(you));
+  // Center: just brand decoration (dice/actions/log moved out)
+  const center = document.createElement('div');
+  center.className = 'mp-board-center';
 
-  // Token layer (over the board)
+  const brand = document.createElement('div');
+  brand.className = 'mp-brand';
+  brand.textContent = state.deckName || 'Монополия';
+  center.appendChild(brand);
+
+  const sub = document.createElement('div');
+  sub.className = 'mp-brand-sub';
+  sub.textContent = 'корпоративная лига';
+  center.appendChild(sub);
+
+  board.appendChild(center);
   board.appendChild(mpBuildTokenLayer());
 
   boardWrap.appendChild(board);
-  layout.appendChild(boardWrap);
+  col.appendChild(boardWrap);
 
-  // Sidebar
-  layout.appendChild(mpBuildSidebar());
+  // Action bar below the board
+  col.appendChild(mpBuildActionBar(you));
 
-  area.appendChild(layout);
+  return col;
+}
+
+function mpBuildActionBar(you) {
+  const bar = document.createElement('div');
+  bar.className = 'mp-action-bar';
+
+  const status = document.createElement('div');
+  status.className = 'mp-action-status';
+  const label = document.createElement('div');
+  label.className = 'mp-action-status-label';
+  const isYou = you && you.id === state.currentPlayerId;
+  label.textContent = isYou ? 'Ваш ход' : 'Сейчас ходит';
+  const name = document.createElement('div');
+  name.className = 'mp-action-status-name';
+  const cur = state.players.find((pp) => pp.id === state.currentPlayerId);
+  name.textContent = cur ? cur.name : '—';
+  status.appendChild(label);
+  status.appendChild(name);
+  bar.appendChild(status);
+
+  // Dice
+  const diceBox = document.createElement('div');
+  diceBox.className = 'mp-action-dice';
+  const d1 = state.dice ? state.dice[0] : 0;
+  const d2 = state.dice ? state.dice[1] : 0;
+  diceBox.innerHTML = mpDieDots(d1) + mpDieDots(d2);
+  bar.appendChild(diceBox);
+
+  // Action buttons (only for current player)
+  const btns = document.createElement('div');
+  btns.className = 'mp-action-btns';
+  if (isYou && state.mpPhase === 'playing') {
+    if (state.mpTurn === 'rolling') {
+      const b = document.createElement('button');
+      b.className = 'mp-cta mp-cta-primary';
+      b.textContent = 'Бросить';
+      b.onclick = () => send({ type: 'roll-dice' });
+      btns.appendChild(b);
+    } else if (state.mpTurn === 'jail-decision') {
+      const ps = state.playerState[you.id];
+      const r = document.createElement('button');
+      r.className = 'mp-cta mp-cta-primary';
+      r.textContent = 'Бросать на дубль';
+      r.onclick = () => send({ type: 'roll-dice' });
+      btns.appendChild(r);
+      if (ps && ps.money >= 50) {
+        const p = document.createElement('button');
+        p.className = 'mp-cta mp-cta-secondary';
+        p.textContent = `Заплатить ${MP_CURRENCY}50`;
+        p.onclick = () => send({ type: 'pay-jail' });
+        btns.appendChild(p);
+      }
+    } else if (state.mpTurn === 'action') {
+      if (state.pendingBuy) {
+        const ps = state.playerState[you.id];
+        const canAfford = ps && ps.money >= state.pendingBuy.price;
+        const b = document.createElement('button');
+        b.className = 'mp-cta mp-cta-danger';
+        b.textContent = `Купить за ${MP_CURRENCY}${state.pendingBuy.price}`;
+        b.disabled = !canAfford;
+        b.onclick = () => send({ type: 'buy-property' });
+        btns.appendChild(b);
+        const s = document.createElement('button');
+        s.className = 'mp-cta mp-cta-secondary';
+        s.textContent = 'Отказаться';
+        s.onclick = () => send({ type: 'skip-buy' });
+        btns.appendChild(s);
+      } else {
+        const e = document.createElement('button');
+        e.className = 'mp-cta mp-cta-primary';
+        const rolledDouble = state.dice && state.dice[0] === state.dice[1] && state.doublesCount > 0 && state.doublesCount < 3;
+        e.textContent = rolledDouble ? 'Бросить ещё' : 'Завершить ход';
+        e.onclick = () => send({ type: 'end-turn' });
+        btns.appendChild(e);
+      }
+    }
+  } else {
+    const wait = document.createElement('div');
+    wait.style.cssText = 'font-family: var(--mp-mono); font-size: 11px; color: var(--mp-muted-ink); letter-spacing: 1px; text-transform: uppercase;';
+    wait.textContent = 'ждём ход';
+    btns.appendChild(wait);
+  }
+  bar.appendChild(btns);
+  return bar;
+}
+
+function mpBuildRightAside() {
+  const aside = document.createElement('div');
+  aside.className = 'mp-aside-right';
+
+  const sq = mpFindTileByIndex(mpSelectedTile);
+  if (!sq) {
+    aside.innerHTML = '<div class="mp-aside-h">Клетка</div><div style="color: var(--mp-muted-ink); font-size: 13px;">Выбери клетку на доске</div>';
+    return aside;
+  }
+
+  const h = document.createElement('div');
+  h.className = 'mp-aside-h';
+  h.textContent = sq.type === 'property' ? 'Свидетельство' : sq.type === 'transport' ? 'Транспорт' : sq.type === 'utility' ? 'Ресурс' : 'Клетка';
+  aside.appendChild(h);
+
+  // Group color strip (only for property)
+  if (sq.color) {
+    const strip = document.createElement('div');
+    strip.className = 'mp-deed-strip';
+    strip.style.setProperty('--mp-deed-color', sq.color);
+    aside.appendChild(strip);
+  }
+
+  // Group name (small caps) — only for property
+  if (sq.type === 'property' && state.groups && sq.group) {
+    const grp = state.groups[sq.group];
+    if (grp) {
+      const g = document.createElement('div');
+      g.className = 'mp-deed-group';
+      g.textContent = grp.name;
+      aside.appendChild(g);
+    }
+  }
+
+  const title = document.createElement('div');
+  title.className = 'mp-deed-title';
+  title.textContent = sq.name || (sq.type === 'go' ? 'Старт' : sq.type === 'jail' ? 'Тюрьма' : sq.type === 'parking' ? 'Парковка' : sq.type === 'go_to_jail' ? 'В тюрьму' : sq.type === 'chance' ? 'Шанс' : sq.type === 'chest' ? 'Казна' : sq.type === 'tax' ? 'Налог' : '—');
+  aside.appendChild(title);
+
+  // Type-specific info
+  const rows = document.createElement('div');
+  rows.className = 'mp-deed-rows';
+
+  if (sq.type === 'property' || sq.type === 'transport' || sq.type === 'utility') {
+    const ownerId = sq.slug ? state.ownership[sq.slug] : null;
+    const ownerP = ownerId ? state.players.find((pp) => pp.id === ownerId) : null;
+    rows.appendChild(mpDeedRow('Цена', `<span class="mp-cur">${MP_CURRENCY}</span>${sq.price}`));
+    rows.appendChild(mpDeedRow('Владелец', ownerP ? ownerP.name : '—'));
+    if (sq.type === 'property') {
+      rows.appendChild(mpDeedRow('Домов', '0'));
+    }
+  } else if (sq.type === 'tax') {
+    rows.appendChild(mpDeedRow('Сумма', `<span class="mp-cur">−${MP_CURRENCY}</span>${sq.amount}`));
+  } else if (sq.type === 'go') {
+    rows.appendChild(mpDeedRow('Бонус', `<span class="mp-cur">+${MP_CURRENCY}</span>200`));
+  } else if (sq.type === 'go_to_jail') {
+    rows.appendChild(mpDeedRow('Эффект', 'отправить в тюрьму'));
+  }
+  aside.appendChild(rows);
+
+  // Rent schedule (property)
+  if (sq.type === 'property' && sq.rent) {
+    const h2 = document.createElement('div');
+    h2.className = 'mp-aside-h';
+    h2.textContent = 'Рента';
+    aside.appendChild(h2);
+    const rentTable = document.createElement('div');
+    rentTable.className = 'mp-rent-table';
+    const labels = ['База', '1 дом', '2 дома', '3 дома', '4 дома', 'Отель'];
+    for (let i = 0; i < sq.rent.length; i++) {
+      const r = document.createElement('div');
+      r.className = 'mp-rent-row';
+      if (i === 0) r.classList.add('is-current');
+      r.innerHTML = `<span class="mp-rent-label">${labels[i]}</span><span class="mp-rent-val"><span class="mp-cur">${MP_CURRENCY}</span>${sq.rent[i]}</span>`;
+      rentTable.appendChild(r);
+    }
+    aside.appendChild(rentTable);
+  }
+
+  // Transport rent ladder
+  if (sq.type === 'transport') {
+    const h2 = document.createElement('div');
+    h2.className = 'mp-aside-h';
+    h2.textContent = 'Рента (по числу владений)';
+    aside.appendChild(h2);
+    const tbl = document.createElement('div');
+    tbl.className = 'mp-rent-table';
+    const rates = [25, 50, 100, 200];
+    for (let i = 0; i < 4; i++) {
+      const r = document.createElement('div');
+      r.className = 'mp-rent-row';
+      r.innerHTML = `<span class="mp-rent-label">${i + 1} ${i === 0 ? 'владение' : 'владения'}</span><span class="mp-rent-val"><span class="mp-cur">${MP_CURRENCY}</span>${rates[i]}</span>`;
+      tbl.appendChild(r);
+    }
+    aside.appendChild(tbl);
+  }
+
+  if (sq.type === 'utility') {
+    const h2 = document.createElement('div');
+    h2.className = 'mp-aside-h';
+    h2.textContent = 'Рента';
+    aside.appendChild(h2);
+    const tbl = document.createElement('div');
+    tbl.className = 'mp-rent-table';
+    tbl.innerHTML = `
+      <div class="mp-rent-row"><span class="mp-rent-label">1 ресурс</span><span class="mp-rent-val">×4 от кубика</span></div>
+      <div class="mp-rent-row"><span class="mp-rent-label">2 ресурса</span><span class="mp-rent-val">×10 от кубика</span></div>`;
+    aside.appendChild(tbl);
+  }
+
+  return aside;
+}
+
+function mpDeedRow(label, val) {
+  const r = document.createElement('div');
+  r.className = 'mp-deed-row';
+  r.innerHTML = `<span class="mp-deed-row-label">${label}</span><span class="mp-deed-row-val">${val}</span>`;
+  return r;
 }
 
 function mpBuildTile(sq) {
@@ -1444,6 +1807,8 @@ function mpBuildTile(sq) {
   tile.className = `mp-tile mp-tile-${edge}`;
   tile.style.gridRow = gp.row;
   tile.style.gridColumn = gp.col;
+  if (mpSelectedTile === sq.index) tile.classList.add('is-selected');
+  tile.onclick = () => { mpSelectedTile = sq.index; render(); };
 
   // Owner frame color via custom prop
   const ownerId = sq.slug ? state.ownership[sq.slug] : null;
@@ -1550,104 +1915,6 @@ function mpBuildTile(sq) {
   return tile;
 }
 
-function mpBuildCenter(you) {
-  const center = document.createElement('div');
-  center.className = 'mp-board-center';
-
-  const brand = document.createElement('div');
-  brand.className = 'mp-brand';
-  brand.textContent = state.deckName || 'Монополия';
-  center.appendChild(brand);
-
-  const sub = document.createElement('div');
-  sub.className = 'mp-brand-sub';
-  sub.textContent = '— корпоративная лига —';
-  center.appendChild(sub);
-
-  // Dice
-  const diceBox = document.createElement('div');
-  diceBox.className = 'mp-dice';
-  if (state.dice) {
-    const [d1, d2] = state.dice;
-    diceBox.innerHTML = `<div class="mp-die">${d1}</div><div class="mp-die">${d2}</div>`;
-    if (d1 === d2) {
-      const dbl = document.createElement('div');
-      dbl.className = 'mp-dice-label';
-      dbl.textContent = 'дубль';
-      diceBox.appendChild(dbl);
-    }
-  } else {
-    diceBox.innerHTML = `<div class="mp-die mp-die-empty">·</div><div class="mp-die mp-die-empty">·</div>`;
-  }
-  center.appendChild(diceBox);
-
-  // Actions
-  if (you && you.id === state.currentPlayerId && state.mpPhase === 'playing') {
-    const actions = document.createElement('div');
-    actions.className = 'mp-actions';
-    if (state.mpTurn === 'rolling') {
-      const btn = document.createElement('button');
-      btn.className = 'mp-btn mp-btn-roll';
-      btn.textContent = 'Бросить кубики';
-      btn.onclick = () => send({ type: 'roll-dice' });
-      actions.appendChild(btn);
-    } else if (state.mpTurn === 'jail-decision') {
-      const ps = state.playerState[you.id];
-      const rollBtn = document.createElement('button');
-      rollBtn.className = 'mp-btn mp-btn-roll';
-      rollBtn.textContent = 'Бросать на дубль';
-      rollBtn.onclick = () => send({ type: 'roll-dice' });
-      actions.appendChild(rollBtn);
-      if (ps && ps.money >= 50) {
-        const payBtn = document.createElement('button');
-        payBtn.className = 'mp-btn';
-        payBtn.textContent = `Заплатить ${MP_CURRENCY}50`;
-        payBtn.onclick = () => send({ type: 'pay-jail' });
-        actions.appendChild(payBtn);
-      }
-    } else if (state.mpTurn === 'action') {
-      if (state.pendingBuy) {
-        const ps = state.playerState[you.id];
-        const canAfford = ps && ps.money >= state.pendingBuy.price;
-        const buyBtn = document.createElement('button');
-        buyBtn.className = 'mp-btn mp-btn-buy';
-        buyBtn.textContent = `Купить за ${MP_CURRENCY}${state.pendingBuy.price}`;
-        buyBtn.disabled = !canAfford;
-        buyBtn.onclick = () => send({ type: 'buy-property' });
-        actions.appendChild(buyBtn);
-        const skipBtn = document.createElement('button');
-        skipBtn.className = 'mp-btn';
-        skipBtn.textContent = 'Отказаться';
-        skipBtn.onclick = () => send({ type: 'skip-buy' });
-        actions.appendChild(skipBtn);
-      } else {
-        const endBtn = document.createElement('button');
-        endBtn.className = 'mp-btn mp-btn-end';
-        const rolledDouble = state.dice && state.dice[0] === state.dice[1] && state.doublesCount > 0 && state.doublesCount < 3;
-        endBtn.textContent = rolledDouble ? 'Бросить ещё' : 'Завершить ход';
-        endBtn.onclick = () => send({ type: 'end-turn' });
-        actions.appendChild(endBtn);
-      }
-    }
-    center.appendChild(actions);
-  }
-
-  // Log
-  const logBox = document.createElement('div');
-  logBox.className = 'mp-log';
-  if (state.log) {
-    for (const entry of state.log.slice(-5)) {
-      const line = document.createElement('div');
-      line.className = 'mp-log-line';
-      line.textContent = entry.text;
-      logBox.appendChild(line);
-    }
-  }
-  center.appendChild(logBox);
-
-  return center;
-}
-
 function mpBuildTokenLayer() {
   const layer = document.createElement('div');
   layer.className = 'mp-tokens-layer';
@@ -1685,57 +1952,6 @@ function mpBuildTokenLayer() {
     layer.appendChild(tok);
   }
   return layer;
-}
-
-function mpBuildSidebar() {
-  const side = document.createElement('div');
-  side.className = 'mp-sidebar';
-  for (const pid of state.turnOrder) {
-    const p = state.players.find((pp) => pp.id === pid);
-    const ps = state.playerState[pid];
-    if (!p || !ps) continue;
-    const card = document.createElement('div');
-    card.className = 'mp-player-card';
-    if (ps.bankrupt) card.classList.add('mp-player-bankrupt');
-    if (pid === state.currentPlayerId && state.mpPhase === 'playing') card.classList.add('mp-player-active');
-    card.style.setProperty('--mp-player-color', mpTokenColor(pid));
-
-    const head = document.createElement('div');
-    head.className = 'mp-player-head';
-    const dot = document.createElement('span');
-    dot.className = 'mp-player-dot';
-    dot.style.background = mpTokenColor(pid);
-    head.appendChild(dot);
-    const name = document.createElement('span');
-    name.className = 'mp-player-name';
-    name.textContent = p.name + (ps.inJail ? ' 🔒' : '') + (ps.bankrupt ? ' ×' : '');
-    head.appendChild(name);
-    card.appendChild(head);
-
-    const money = document.createElement('div');
-    money.className = 'mp-player-money';
-    money.innerHTML = `<span class="mp-cur">${MP_CURRENCY}</span>${ps.money}`;
-    card.appendChild(money);
-
-    const owned = Object.entries(state.ownership).filter(([, o]) => o === pid).map(([slug]) => slug);
-    if (owned.length) {
-      const props = document.createElement('div');
-      props.className = 'mp-player-props';
-      for (const slug of owned) {
-        const sq = state.board.find((s) => s.slug === slug);
-        if (!sq) continue;
-        const chip = document.createElement('span');
-        chip.className = 'mp-prop-chip';
-        chip.textContent = sq.name;
-        chip.title = sq.name;
-        if (sq.color) chip.style.setProperty('--mp-chip-color', sq.color);
-        props.appendChild(chip);
-      }
-      card.appendChild(props);
-    }
-    side.appendChild(card);
-  }
-  return side;
 }
 
 // ============================================================

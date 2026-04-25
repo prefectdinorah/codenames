@@ -1396,6 +1396,81 @@ button.sf-location-card:hover {
    ============================================================ */
 @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* When monopoly mode is active, theme the entire shell */
+body.gm-monopoly {
+  background: #ebe4d4;
+  color: #2a2418;
+}
+body.gm-monopoly .game-screen { background: #ebe4d4; }
+body.gm-monopoly .top-bar {
+  background: #f4eede;
+  color: #2a2418;
+  border-bottom: 0.5px solid rgba(42, 36, 24, 0.18);
+  padding: 12px 18px;
+}
+body.gm-monopoly .top-bar .room-label,
+body.gm-monopoly .top-bar .room-code,
+body.gm-monopoly .top-bar .game-mode-badge {
+  font-family: "Instrument Serif", serif;
+  background: transparent;
+  color: #2a2418;
+  letter-spacing: -0.3px;
+  font-weight: 500;
+}
+body.gm-monopoly .top-bar .game-mode-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #8a7f65;
+  text-transform: uppercase;
+  border: 0;
+  padding: 0;
+}
+body.gm-monopoly .top-bar .room-code { font-size: 18px; }
+body.gm-monopoly .top-bar .btn-leave {
+  background: transparent;
+  color: #8a7f65;
+  border: 0.5px solid rgba(42, 36, 24, 0.2);
+}
+body.gm-monopoly .name-editor input,
+body.gm-monopoly .name-editor button {
+  background: #fbf6e8;
+  color: #2a2418;
+  border: 0.5px solid rgba(42, 36, 24, 0.2);
+  font-family: "Inter", sans-serif;
+}
+body.gm-monopoly #scores-bar { display: none; }
+body.gm-monopoly .info-bar {
+  background: #f4eede;
+  color: #2a2418;
+  border-bottom: 0.5px solid rgba(42, 36, 24, 0.18);
+  padding: 8px 18px;
+}
+body.gm-monopoly .turn-indicator { color: #2a2418; font-family: "Instrument Serif", serif; }
+body.gm-monopoly .btn-action {
+  background: #fbf6e8;
+  color: #2a2418;
+  border: 0.5px solid rgba(42, 36, 24, 0.2);
+  font-family: "Inter", sans-serif;
+}
+body.gm-monopoly .btn-action:hover { background: #fff; }
+body.gm-monopoly .settings-dropdown {
+  background: #fbf6e8;
+  color: #2a2418;
+  border: 0.5px solid rgba(42, 36, 24, 0.2);
+}
+body.gm-monopoly .settings-dropdown label,
+body.gm-monopoly .settings-dropdown select {
+  color: #2a2418;
+  background: #fff;
+  border-color: rgba(42, 36, 24, 0.2);
+}
+body.gm-monopoly #player-panel { display: none; }
+body.gm-monopoly .pause-overlay { background: rgba(235, 228, 212, 0.92); color: #2a2418; }
+body.gm-monopoly .pause-overlay .pause-text { color: #2a2418; font-family: "Instrument Serif", serif; }
+body.gm-monopoly .winner-overlay { background: rgba(235, 228, 212, 0.95); color: #2a2418; }
+body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif", serif; }
+
 /* Warm-paper palette (applies within the monopoly view) */
 #monopoly-area {
   --mp-surface-bg: #ebe4d4;
@@ -1878,15 +1953,269 @@ button.sf-location-card:hover {
   white-space: nowrap;
 }
 
-@media (max-width: 1000px) {
-  .mp-layout { grid-template-columns: 1fr; }
-  .mp-sidebar { max-height: none; flex-direction: row; flex-wrap: wrap; }
-  .mp-player-card { flex: 1 1 45%; min-width: 140px; }
+@media (max-width: 1100px) {
+  .mp-page-grid { grid-template-columns: 1fr !important; }
+  .mp-aside-left, .mp-aside-right { max-height: none !important; }
 }
 @media (max-width: 640px) {
   .mp-board { --mp-board-size: 95vmin; }
   .mp-brand { font-size: 26px; }
-  .mp-die { width: 38px; height: 38px; font-size: 18px; }
+}
+
+/* ─── New 3-column layout ────────────────────────────────── */
+.mp-page-grid {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 280px;
+  gap: 0;
+  align-items: stretch;
+  max-width: 1480px;
+  margin: 0 auto;
+}
+.mp-aside-left, .mp-aside-right {
+  background: var(--mp-panel-bg);
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 0;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  font-family: var(--mp-ui);
+}
+.mp-aside-left { border-right: 0; }
+.mp-aside-right { border-left: 0; }
+.mp-board-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 12px 24px;
+}
+
+.mp-aside-h {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+  margin-bottom: 10px;
+}
+.mp-aside-counter {
+  font-family: var(--mp-serif);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -1px;
+  color: var(--mp-ink);
+  line-height: 1;
+  margin-bottom: 14px;
+}
+
+/* Player rows in left aside */
+.mp-player-rows { display: flex; flex-direction: column; }
+.mp-player-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin: 0 -12px;
+  transition: background 120ms ease;
+}
+.mp-player-row.is-active { background: var(--mp-active-row); }
+.mp-player-row.is-bankrupt { opacity: 0.4; }
+.mp-prow-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mp-prow-main { flex: 1; min-width: 0; }
+.mp-prow-name-row { display: flex; align-items: baseline; gap: 6px; }
+.mp-prow-name {
+  font-family: var(--mp-serif);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--mp-ink);
+  letter-spacing: -0.3px;
+}
+.mp-prow-tag {
+  font-family: var(--mp-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+}
+.mp-prow-stats {
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  color: var(--mp-muted-ink);
+  margin-top: 2px;
+  letter-spacing: 0.2px;
+}
+.mp-prow-stats .mp-cur { color: var(--mp-ink); }
+.mp-prow-stats .mp-money { color: var(--mp-ink); margin-right: 6px; }
+
+/* Activity log */
+.mp-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  color: var(--mp-muted-ink);
+  line-height: 1.4;
+}
+.mp-act-line { display: flex; gap: 10px; }
+.mp-act-time { color: var(--mp-muted-ink); flex-shrink: 0; opacity: 0.7; }
+.mp-act-text { color: var(--mp-ink); }
+
+/* DEED (right aside) */
+.mp-deed-strip {
+  height: 4px;
+  width: 100%;
+  background: var(--mp-deed-color, var(--mp-muted-ink));
+  margin-bottom: 16px;
+}
+.mp-deed-group {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+  margin-bottom: 8px;
+}
+.mp-deed-title {
+  font-family: var(--mp-serif);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.8px;
+  color: var(--mp-ink);
+  margin-bottom: 22px;
+}
+.mp-deed-rows { display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+.mp-deed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mp-ui);
+  font-size: 13px;
+}
+.mp-deed-row-label { color: var(--mp-muted-ink); }
+.mp-deed-row-val { color: var(--mp-ink); font-family: var(--mp-mono); }
+.mp-deed-row-val .mp-cur { color: var(--mp-muted-ink); margin-right: 1px; }
+
+.mp-rent-table { display: flex; flex-direction: column; gap: 8px; }
+.mp-rent-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mp-mono);
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 0.5px solid var(--mp-hairline);
+}
+.mp-rent-row:last-child { border-bottom: 0; }
+.mp-rent-row.is-current { color: var(--mp-ink); font-weight: 500; }
+.mp-rent-row.is-current .mp-rent-label { font-weight: 600; }
+.mp-rent-label { color: var(--mp-muted-ink); }
+.mp-rent-val { color: var(--mp-ink); }
+
+/* Bottom action bar */
+.mp-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 14px 22px;
+  background: var(--mp-tile-bg);
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(42, 36, 24, 0.06);
+  font-family: var(--mp-ui);
+  margin-top: 8px;
+}
+.mp-action-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding-right: 8px;
+  border-right: 0.5px solid var(--mp-hairline);
+  margin-right: 4px;
+}
+.mp-action-status-label {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+}
+.mp-action-status-name {
+  font-family: var(--mp-serif);
+  font-size: 18px;
+  color: var(--mp-ink);
+  letter-spacing: -0.3px;
+  line-height: 1.1;
+}
+.mp-action-dice { display: flex; gap: 8px; }
+.mp-action-btns { display: flex; gap: 8px; }
+
+/* Dot dice */
+.mp-die-svg {
+  width: 44px;
+  height: 44px;
+  background: #fff;
+  border: 0.5px solid var(--mp-ink);
+  border-radius: 6px;
+  padding: 5px;
+  box-sizing: border-box;
+  box-shadow: 0 2px 5px rgba(42, 36, 24, 0.1);
+}
+.mp-die-svg.is-empty { background: transparent; border-style: dashed; opacity: 0.5; }
+.mp-die-svg circle { fill: var(--mp-ink); }
+
+/* CTA buttons in action bar */
+.mp-cta {
+  padding: 11px 22px;
+  border: 0;
+  border-radius: 6px;
+  font-family: var(--mp-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.mp-cta-primary {
+  background: var(--mp-ink);
+  color: var(--mp-accent-ink);
+}
+.mp-cta-primary:hover:not(:disabled) { background: #1a1814; }
+.mp-cta-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.mp-cta-secondary {
+  background: transparent;
+  color: var(--mp-ink);
+  border: 0.5px solid var(--mp-ink);
+}
+.mp-cta-secondary:hover:not(:disabled) { background: rgba(42, 36, 24, 0.04); }
+.mp-cta-danger {
+  background: var(--mp-accent);
+  color: var(--mp-accent-ink);
+}
+.mp-cta-danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* Tile selection ring */
+.mp-tile.is-selected .mp-tile-card { box-shadow: 0 0 0 2px var(--mp-accent); }
+.mp-tile.is-selected .mp-corner-body { box-shadow: 0 0 0 2px var(--mp-accent); }
+
+@media (max-width: 1280px) {
+  .mp-page-grid { grid-template-columns: 220px minmax(0, 1fr) 260px; }
+}
+@media (max-width: 1100px) {
+  .mp-page-grid { grid-template-columns: 1fr; }
+  .mp-aside-left, .mp-aside-right { max-height: none; }
 }
 
 /* ============================================================
