@@ -2056,6 +2056,86 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 .mp-prow-stats .mp-cur { color: var(--mp-ink); }
 .mp-prow-stats .mp-money { color: var(--mp-ink); margin-right: 6px; }
 
+/* Empty slot styling */
+.mp-player-row.is-empty-slot {
+  border: 0.5px dashed var(--mp-hairline);
+  background: transparent;
+  margin: 4px 0;
+  padding: 12px;
+  border-radius: 6px;
+}
+.mp-empty-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mp-slot-label {
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+}
+.mp-slot-empty-note {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  color: var(--mp-muted-ink);
+  opacity: 0.6;
+}
+.mp-slot-join {
+  font-family: var(--mp-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  background: var(--mp-ink);
+  color: var(--mp-accent-ink);
+  border: 0;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.mp-slot-join:hover { filter: brightness(1.15); }
+.mp-slot-leave {
+  background: transparent;
+  border: 0.5px solid var(--mp-hairline);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--mp-muted-ink);
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.mp-slot-leave:hover { background: var(--mp-hairline); color: var(--mp-ink); }
+
+/* Spectators */
+.mp-spec-counter {
+  font-family: var(--mp-serif);
+  font-size: 22px;
+  letter-spacing: -0.5px;
+  color: var(--mp-ink);
+  margin-bottom: 8px;
+  line-height: 1;
+}
+.mp-spec-empty {
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  color: var(--mp-muted-ink);
+  opacity: 0.6;
+}
+.mp-spec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mp-spec-row {
+  font-family: var(--mp-ui);
+  font-size: 13px;
+  color: var(--mp-ink);
+  padding: 4px 0;
+  border-bottom: 0.5px solid var(--mp-hairline);
+}
+.mp-spec-row:last-child { border-bottom: 0; }
+
 /* Activity log */
 .mp-activity {
   display: flex;

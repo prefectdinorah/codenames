@@ -515,7 +515,7 @@ function createRoom(hostId, gameMode) {
     settings = { mode: 'free', turnDuration: 120 };
     game = createWhoamiGame(settings);
   } else if (gameMode === 'monopoly') {
-    settings = { startingMoney: 1500, deckId: 'classic' };
+    settings = { startingMoney: 1500, deckId: 'classic', maxPlayers: 4 };
     game = createMonopolyGame(settings);
   } else {
     settings = { teamCount: 2, gridRows: 5, gridCols: 5, timerDuration: 0 };
@@ -995,6 +995,13 @@ wss.on('connection', (ws) => {
       const role = msg.role || null;
       if (currentRoom.gameMode === 'spyfall' || currentRoom.gameMode === 'whoami' || currentRoom.gameMode === 'monopoly') {
         if (team && team !== 'player') return;
+        if (currentRoom.gameMode === 'monopoly' && team === 'player' && player.team !== 'player') {
+          if (currentRoom.game.phase !== 'lobby') return; // can't join mid-game
+          const cap = currentRoom.settings.maxPlayers || 4;
+          let occupied = 0;
+          for (const [, p] of currentRoom.players) if (p.team === 'player') occupied++;
+          if (occupied >= cap) return;
+        }
       } else {
         if (team && !currentRoom.game.teams.includes(team)) return;
       }
@@ -2070,8 +2077,23 @@ function handleMonopolyMsg(room, playerId, msg) {
     if (playerId !== room.hostId) return;
     const startingMoney = Math.max(500, Math.min(5000, parseInt(msg.startingMoney, 10) || 1500));
     const deckId = (msg.deckId || 'classic').toString();
-    room.settings = { startingMoney, deckId };
-    room.game = createMonopolyGame(room.settings);
+    let maxPlayers = parseInt(msg.maxPlayers, 10);
+    if (!Number.isFinite(maxPlayers) || maxPlayers < 2 || maxPlayers > 8) maxPlayers = 4;
+    room.settings = { startingMoney, deckId, maxPlayers };
+    // If lobby, recreate game to refresh deck; if mid-game, ignore (would reset)
+    if (room.game.phase === 'lobby') {
+      room.game = createMonopolyGame(room.settings);
+    }
+    // Boot any extra players over the new cap
+    if (room.game.phase === 'lobby') {
+      const playerIds = [];
+      for (const [id, p] of room.players) if (p.team === 'player') playerIds.push(id);
+      while (playerIds.length > maxPlayers) {
+        const id = playerIds.pop();
+        const p = room.players.get(id);
+        if (p) { p.team = null; p.role = null; }
+      }
+    }
     broadcastRoom(room);
     return;
   }

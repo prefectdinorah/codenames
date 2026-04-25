@@ -133,6 +133,7 @@ $('#btn-apply-settings').onclick = () => {
       type: 'update-settings',
       startingMoney: $('#sm-money').value,
       deckId: $('#sm-deck').value,
+      maxPlayers: $('#sm-slots').value,
     });
   }
   $('#settings-dropdown').classList.add('hidden');
@@ -219,6 +220,7 @@ function render() {
     } else if (gm === 'monopoly') {
       if (state.settings.startingMoney) $('#sm-money').value = state.settings.startingMoney;
       if (state.settings.deckId) $('#sm-deck').value = state.settings.deckId;
+      if (state.settings.maxPlayers) $('#sm-slots').value = state.settings.maxPlayers;
       if (window.mpPopulateDeckDropdown) window.mpPopulateDeckDropdown();
     }
   }
@@ -1425,28 +1427,9 @@ function renderMonopolyArea() {
   const area = $('#monopoly-area');
   area.innerHTML = '';
   const you = state.you;
-  const isHost = you && you.id === state.hostId;
 
-  if (state.mpPhase === 'lobby') {
-    const msg = document.createElement('div');
-    msg.className = 'mp-lobby-msg';
-    const inGame = state.players.filter((p) => p.team === 'player').length;
-    msg.textContent = inGame < 2 ? `Нужно минимум 2 игрока (сейчас ${inGame})`
-      : inGame > 8 ? `Максимум 8 игроков (сейчас ${inGame})`
-      : `Готово к старту! Игроков: ${inGame}`;
-    area.appendChild(msg);
-    if (isHost && inGame >= 2 && inGame <= 8) {
-      const btn = document.createElement('button');
-      btn.className = 'mp-btn-start';
-      btn.textContent = 'Начать игру';
-      btn.onclick = () => send({ type: 'start-game' });
-      area.appendChild(btn);
-    }
-    return;
-  }
-
-  // Default selected tile = current player's position (or selected one)
-  if (mpSelectedTile == null) {
+  // Default selected tile = current player's position (when game running)
+  if (mpSelectedTile == null && state.currentPlayerId) {
     const ps = state.playerState[state.currentPlayerId];
     mpSelectedTile = ps ? ps.position : 0;
   }
@@ -1464,95 +1447,151 @@ function mpBuildLeftAside() {
   const aside = document.createElement('div');
   aside.className = 'mp-aside-left';
 
-  // Players section
-  const playersSection = document.createElement('div');
+  const isPlaying = state.mpPhase === 'playing' || state.mpPhase === 'finished';
+  const maxSlots = (state.settings && state.settings.maxPlayers) || 4;
+  const players = state.players.filter((p) => p.team === 'player');
+  const you = state.you;
+  const youInSlot = you && you.team === 'player';
+
+  // Slots section
+  const slotsSection = document.createElement('div');
   const h1 = document.createElement('div');
   h1.className = 'mp-aside-h';
-  h1.textContent = 'Игроки';
-  playersSection.appendChild(h1);
+  h1.textContent = isPlaying ? 'Игроки' : 'Слоты';
+  slotsSection.appendChild(h1);
 
   const counter = document.createElement('div');
   counter.className = 'mp-aside-counter';
-  counter.textContent = `${state.turnOrder.length}/${state.turnOrder.length}`;
-  playersSection.appendChild(counter);
+  counter.textContent = `${players.length}/${maxSlots}`;
+  slotsSection.appendChild(counter);
 
   const rows = document.createElement('div');
   rows.className = 'mp-player-rows';
-  const you = state.you;
-  for (const pid of state.turnOrder) {
-    const p = state.players.find((pp) => pp.id === pid);
-    const ps = state.playerState[pid];
-    if (!p || !ps) continue;
+
+  // During playing, use turnOrder for stable ordering. Otherwise use joined order.
+  const orderedIds = isPlaying ? state.turnOrder : players.map((p) => p.id);
+
+  for (let i = 0; i < maxSlots; i++) {
+    const pid = orderedIds[i];
+    const p = pid ? state.players.find((pp) => pp.id === pid) : null;
+    const ps = pid ? (state.playerState && state.playerState[pid]) : null;
+
     const row = document.createElement('div');
     row.className = 'mp-player-row';
-    if (pid === state.currentPlayerId && state.mpPhase === 'playing') row.classList.add('is-active');
-    if (ps.bankrupt) row.classList.add('is-bankrupt');
 
-    const dot = document.createElement('div');
-    dot.className = 'mp-prow-dot';
-    dot.style.background = mpTokenColor(pid);
-    row.appendChild(dot);
+    if (p) {
+      // Filled slot
+      if (isPlaying && pid === state.currentPlayerId) row.classList.add('is-active');
+      if (ps && ps.bankrupt) row.classList.add('is-bankrupt');
 
-    const main = document.createElement('div');
-    main.className = 'mp-prow-main';
+      const dot = document.createElement('div');
+      dot.className = 'mp-prow-dot';
+      dot.style.background = mpTokenColor(pid);
+      row.appendChild(dot);
 
-    const nameRow = document.createElement('div');
-    nameRow.className = 'mp-prow-name-row';
-    const nm = document.createElement('span');
-    nm.className = 'mp-prow-name';
-    nm.textContent = p.name;
-    nameRow.appendChild(nm);
-    if (you && you.id === pid) {
-      const tag = document.createElement('span');
-      tag.className = 'mp-prow-tag';
-      tag.textContent = 'вы';
-      nameRow.appendChild(tag);
+      const main = document.createElement('div');
+      main.className = 'mp-prow-main';
+      const nameRow = document.createElement('div');
+      nameRow.className = 'mp-prow-name-row';
+      const nm = document.createElement('span');
+      nm.className = 'mp-prow-name';
+      nm.textContent = p.name;
+      nameRow.appendChild(nm);
+      if (you && you.id === pid) {
+        const tag = document.createElement('span');
+        tag.className = 'mp-prow-tag';
+        tag.textContent = 'вы';
+        nameRow.appendChild(tag);
+      }
+      if (ps && ps.inJail) {
+        const tag = document.createElement('span');
+        tag.className = 'mp-prow-tag';
+        tag.textContent = '🔒';
+        nameRow.appendChild(tag);
+      }
+      main.appendChild(nameRow);
+
+      const stats = document.createElement('div');
+      stats.className = 'mp-prow-stats';
+      if (ps) {
+        const holdings = mpCountHoldings(pid);
+        stats.innerHTML = `<span class="mp-money"><span class="mp-cur">${MP_CURRENCY}</span>${ps.money.toLocaleString('ru-RU')}</span> · ${holdings} ${holdings === 1 ? 'компания' : holdings >= 2 && holdings <= 4 ? 'компании' : 'компаний'}`;
+      } else {
+        stats.innerHTML = `<span class="mp-prow-tag">в слоте</span>`;
+      }
+      main.appendChild(stats);
+      row.appendChild(main);
+
+      // Leave button (only when in lobby, only for self)
+      if (!isPlaying && you && you.id === pid) {
+        const leaveBtn = document.createElement('button');
+        leaveBtn.className = 'mp-slot-leave';
+        leaveBtn.textContent = '×';
+        leaveBtn.title = 'Выйти из слота';
+        leaveBtn.onclick = (ev) => { ev.stopPropagation(); send({ type: 'pick-team', team: null }); };
+        row.appendChild(leaveBtn);
+      }
+    } else {
+      // Empty slot
+      row.classList.add('is-empty-slot');
+      const emptyMain = document.createElement('div');
+      emptyMain.className = 'mp-prow-main mp-empty-main';
+      const slotLabel = document.createElement('div');
+      slotLabel.className = 'mp-slot-label';
+      slotLabel.textContent = `Слот ${i + 1}`;
+      emptyMain.appendChild(slotLabel);
+
+      if (!isPlaying && !youInSlot && you) {
+        const joinBtn = document.createElement('button');
+        joinBtn.className = 'mp-slot-join';
+        joinBtn.textContent = 'Занять место';
+        joinBtn.onclick = () => send({ type: 'pick-team', team: 'player' });
+        emptyMain.appendChild(joinBtn);
+      } else if (!isPlaying) {
+        const note = document.createElement('div');
+        note.className = 'mp-slot-empty-note';
+        note.textContent = 'свободно';
+        emptyMain.appendChild(note);
+      } else {
+        const note = document.createElement('div');
+        note.className = 'mp-slot-empty-note';
+        note.textContent = '—';
+        emptyMain.appendChild(note);
+      }
+      row.appendChild(emptyMain);
     }
-    if (ps.inJail) {
-      const tag = document.createElement('span');
-      tag.className = 'mp-prow-tag';
-      tag.textContent = '🔒';
-      nameRow.appendChild(tag);
-    }
-    main.appendChild(nameRow);
-
-    const stats = document.createElement('div');
-    stats.className = 'mp-prow-stats';
-    const holdings = mpCountHoldings(pid);
-    stats.innerHTML = `<span class="mp-money"><span class="mp-cur">${MP_CURRENCY}</span>${ps.money.toLocaleString('ru-RU')}</span> · ${holdings} ${holdings === 1 ? 'компания' : holdings >= 2 && holdings <= 4 ? 'компании' : 'компаний'}`;
-    main.appendChild(stats);
-
-    row.appendChild(main);
     rows.appendChild(row);
   }
-  playersSection.appendChild(rows);
-  aside.appendChild(playersSection);
+  slotsSection.appendChild(rows);
+  aside.appendChild(slotsSection);
 
-  // Activity section
-  const activitySection = document.createElement('div');
-  const h2 = document.createElement('div');
-  h2.className = 'mp-aside-h';
-  h2.textContent = 'Активность';
-  activitySection.appendChild(h2);
+  // Activity section (only show if there's any history or game running)
+  if (state.log && state.log.length) {
+    const activitySection = document.createElement('div');
+    const h2 = document.createElement('div');
+    h2.className = 'mp-aside-h';
+    h2.textContent = 'Активность';
+    activitySection.appendChild(h2);
 
-  const log = document.createElement('div');
-  log.className = 'mp-activity';
-  const recent = (state.log || []).slice(-12).reverse();
-  for (const entry of recent) {
-    const line = document.createElement('div');
-    line.className = 'mp-act-line';
-    const time = document.createElement('span');
-    time.className = 'mp-act-time';
-    time.textContent = mpFormatTime(entry.ts);
-    line.appendChild(time);
-    const text = document.createElement('span');
-    text.className = 'mp-act-text';
-    text.textContent = entry.text;
-    line.appendChild(text);
-    log.appendChild(line);
+    const log = document.createElement('div');
+    log.className = 'mp-activity';
+    const recent = state.log.slice(-12).reverse();
+    for (const entry of recent) {
+      const line = document.createElement('div');
+      line.className = 'mp-act-line';
+      const time = document.createElement('span');
+      time.className = 'mp-act-time';
+      time.textContent = mpFormatTime(entry.ts);
+      line.appendChild(time);
+      const text = document.createElement('span');
+      text.className = 'mp-act-text';
+      text.textContent = entry.text;
+      line.appendChild(text);
+      log.appendChild(line);
+    }
+    activitySection.appendChild(log);
+    aside.appendChild(activitySection);
   }
-  activitySection.appendChild(log);
-  aside.appendChild(activitySection);
 
   return aside;
 }
@@ -1600,16 +1639,29 @@ function mpBuildActionBar(you) {
   const bar = document.createElement('div');
   bar.className = 'mp-action-bar';
 
+  const isHost = you && you.id === state.hostId;
+  const isLobby = state.mpPhase === 'lobby';
+  const slotsFilled = state.players.filter((p) => p.team === 'player').length;
+  const maxSlots = (state.settings && state.settings.maxPlayers) || 4;
+
   const status = document.createElement('div');
   status.className = 'mp-action-status';
   const label = document.createElement('div');
   label.className = 'mp-action-status-label';
-  const isYou = you && you.id === state.currentPlayerId;
-  label.textContent = isYou ? 'Ваш ход' : 'Сейчас ходит';
   const name = document.createElement('div');
   name.className = 'mp-action-status-name';
-  const cur = state.players.find((pp) => pp.id === state.currentPlayerId);
-  name.textContent = cur ? cur.name : '—';
+
+  if (isLobby) {
+    label.textContent = 'Ожидание';
+    if (slotsFilled < 2) name.textContent = `${slotsFilled}/${maxSlots} · нужно ≥2`;
+    else if (slotsFilled < maxSlots) name.textContent = `${slotsFilled}/${maxSlots} · можно стартовать`;
+    else name.textContent = `${slotsFilled}/${maxSlots} · все слоты заняты`;
+  } else {
+    const isYou = you && you.id === state.currentPlayerId;
+    label.textContent = isYou ? 'Ваш ход' : 'Сейчас ходит';
+    const cur = state.players.find((pp) => pp.id === state.currentPlayerId);
+    name.textContent = cur ? cur.name : '—';
+  }
   status.appendChild(label);
   status.appendChild(name);
   bar.appendChild(status);
@@ -1622,9 +1674,34 @@ function mpBuildActionBar(you) {
   diceBox.innerHTML = mpDieDots(d1) + mpDieDots(d2);
   bar.appendChild(diceBox);
 
-  // Action buttons (only for current player)
+  // Action buttons
   const btns = document.createElement('div');
   btns.className = 'mp-action-btns';
+
+  if (isLobby) {
+    if (isHost && slotsFilled >= 2 && slotsFilled <= 8) {
+      const b = document.createElement('button');
+      b.className = 'mp-cta mp-cta-primary';
+      b.textContent = 'Начать игру';
+      b.onclick = () => send({ type: 'start-game' });
+      btns.appendChild(b);
+    } else if (you && you.team !== 'player' && slotsFilled < maxSlots) {
+      const b = document.createElement('button');
+      b.className = 'mp-cta mp-cta-secondary';
+      b.textContent = 'Занять место';
+      b.onclick = () => send({ type: 'pick-team', team: 'player' });
+      btns.appendChild(b);
+    } else {
+      const wait = document.createElement('div');
+      wait.style.cssText = 'font-family: var(--mp-mono); font-size: 11px; color: var(--mp-muted-ink); letter-spacing: 1px; text-transform: uppercase;';
+      wait.textContent = isHost ? 'нужно ≥2 игрока' : 'ждём старта';
+      btns.appendChild(wait);
+    }
+    bar.appendChild(btns);
+    return bar;
+  }
+
+  const isYou = you && you.id === state.currentPlayerId;
   if (isYou && state.mpPhase === 'playing') {
     if (state.mpTurn === 'rolling') {
       const b = document.createElement('button');
@@ -1684,11 +1761,63 @@ function mpBuildRightAside() {
   const aside = document.createElement('div');
   aside.className = 'mp-aside-right';
 
-  const sq = mpFindTileByIndex(mpSelectedTile);
-  if (!sq) {
-    aside.innerHTML = '<div class="mp-aside-h">Клетка</div><div style="color: var(--mp-muted-ink); font-size: 13px;">Выбери клетку на доске</div>';
-    return aside;
+  const isPlaying = state.mpPhase === 'playing' || state.mpPhase === 'finished';
+  const sq = mpSelectedTile != null ? mpFindTileByIndex(mpSelectedTile) : null;
+
+  // DEED panel (only when playing or a tile is selected during lobby)
+  if (isPlaying || sq) {
+    aside.appendChild(mpBuildDeedPanel(sq));
   }
+
+  // Spectators section
+  aside.appendChild(mpBuildSpectatorsSection());
+
+  return aside;
+}
+
+function mpBuildSpectatorsSection() {
+  const section = document.createElement('div');
+  const h = document.createElement('div');
+  h.className = 'mp-aside-h';
+  h.textContent = 'Зрители';
+  section.appendChild(h);
+
+  const spectators = state.players.filter((p) => !p.team);
+  const counter = document.createElement('div');
+  counter.className = 'mp-spec-counter';
+  counter.textContent = `${spectators.length}`;
+  section.appendChild(counter);
+
+  if (spectators.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'mp-spec-empty';
+    empty.textContent = 'никого';
+    section.appendChild(empty);
+  } else {
+    const list = document.createElement('div');
+    list.className = 'mp-spec-list';
+    for (const p of spectators) {
+      const row = document.createElement('div');
+      row.className = 'mp-spec-row';
+      row.textContent = p.name + (state.you && state.you.id === p.id ? ' · вы' : '');
+      list.appendChild(row);
+    }
+    section.appendChild(list);
+  }
+  return section;
+}
+
+function mpBuildDeedPanel(sq) {
+  const wrap = document.createElement('div');
+  if (!sq) {
+    wrap.innerHTML = '<div class="mp-aside-h">Клетка</div><div class="mp-spec-empty">Выбери клетку на доске</div>';
+    return wrap;
+  }
+  // Continue with deed rendering (re-using the original code below)
+  return mpRenderDeedInto(wrap, sq);
+}
+
+function mpRenderDeedInto(aside, sq) {
 
   const h = document.createElement('div');
   h.className = 'mp-aside-h';
