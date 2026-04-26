@@ -111,8 +111,48 @@ const GO_TO_JAIL_INDEX = 30;
 const GO_SALARY = 200;
 const STARTING_MONEY = 1500;
 
+// Chance ("Шанс") cards. Effects:
+//   pay-bank N      — player pays N to bank
+//   collect-bank N  — player collects N from bank
+//   move-to-index I — advance to board index I, passing GO if needed
+//   move-by N       — move forward N (negative = back, no GO bonus)
+//   go-to-jail      — straight to jail
+//   pay-each N      — pay each other non-bankrupt player N
+//   collect-each N  — collect N from each other non-bankrupt player
+const chanceCards = [
+  { id: 'ch-1',  text: 'Двигайтесь к Старту. Получите ₽200',                effect: { type: 'move-to-index', target: 0 } },
+  { id: 'ch-2',  text: 'Идите в тюрьму. Налоговая нагрянула',                effect: { type: 'go-to-jail' } },
+  { id: 'ch-3',  text: 'Налоговая проверка. Заплатите ₽150',                 effect: { type: 'pay-bank', amount: 150 } },
+  { id: 'ch-4',  text: 'Бонус от инвестора. Получите ₽200',                  effect: { type: 'collect-bank', amount: 200 } },
+  { id: 'ch-5',  text: 'Возврат на 3 клетки',                                effect: { type: 'move-by', steps: -3 } },
+  { id: 'ch-6',  text: 'Дивиденды. Каждый игрок платит вам ₽50',             effect: { type: 'collect-each', amount: 50 } },
+  { id: 'ch-7',  text: 'Штраф за переработку. Заплатите каждому игроку ₽25', effect: { type: 'pay-each', amount: 25 } },
+  { id: 'ch-8',  text: 'Премия за стартап. Получите ₽150',                   effect: { type: 'collect-bank', amount: 150 } },
+  { id: 'ch-9',  text: 'Расходы на офис. Заплатите ₽100',                    effect: { type: 'pay-bank', amount: 100 } },
+  { id: 'ch-10', text: 'Двигайтесь на 5 клеток вперёд',                      effect: { type: 'move-by', steps: 5 } },
+  { id: 'ch-11', text: 'Корпоративный спор. Заплатите ₽50',                  effect: { type: 'pay-bank', amount: 50 } },
+  { id: 'ch-12', text: 'IPO успешно. Получите ₽300',                         effect: { type: 'collect-bank', amount: 300 } },
+];
+
+// Community Chest ("Казна") cards.
+const chestCards = [
+  { id: 'cs-1',  text: 'Возврат налогов. Получите ₽200',           effect: { type: 'collect-bank', amount: 200 } },
+  { id: 'cs-2',  text: 'Дивиденды от акций. Получите ₽50',         effect: { type: 'collect-bank', amount: 50 } },
+  { id: 'cs-3',  text: 'Совет директоров. Пройдите на «Старт»',    effect: { type: 'move-to-index', target: 0 } },
+  { id: 'cs-4',  text: 'Аудит. Заплатите ₽50',                     effect: { type: 'pay-bank', amount: 50 } },
+  { id: 'cs-5',  text: 'Корпоративный штраф. Заплатите ₽100',      effect: { type: 'pay-bank', amount: 100 } },
+  { id: 'cs-6',  text: 'День рождения. Каждый игрок платит вам ₽10', effect: { type: 'collect-each', amount: 10 } },
+  { id: 'cs-7',  text: 'Ошибка банка в вашу пользу. Получите ₽100', effect: { type: 'collect-bank', amount: 100 } },
+  { id: 'cs-8',  text: 'Юридический сбор. Заплатите ₽50',           effect: { type: 'pay-bank', amount: 50 } },
+  { id: 'cs-9',  text: 'Ежегодная премия. Получите ₽25',           effect: { type: 'collect-bank', amount: 25 } },
+  { id: 'cs-10', text: 'Аренда офиса. Заплатите ₽75',               effect: { type: 'pay-bank', amount: 75 } },
+  { id: 'cs-11', text: 'Возврат страховки. Получите ₽100',          effect: { type: 'collect-bank', amount: 100 } },
+  { id: 'cs-12', text: 'Корпоративные взносы. Заплатите ₽50',       effect: { type: 'pay-bank', amount: 50 } },
+];
+
 module.exports = {
   groups, properties, transport, utilities,
   board, TRANSPORT_RENT,
+  chanceCards, chestCards,
   JAIL_INDEX, GO_TO_JAIL_INDEX, GO_SALARY, STARTING_MONEY,
 };

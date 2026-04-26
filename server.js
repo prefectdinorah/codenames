@@ -1780,7 +1780,8 @@ function handleWhoamiMsg(room, playerId, msg) {
 // MONOPOLY GAME LOGIC
 // ============================================================
 
-const { TRANSPORT_RENT, JAIL_INDEX, GO_TO_JAIL_INDEX, GO_SALARY } = monopolyData;
+const { TRANSPORT_RENT, JAIL_INDEX, GO_TO_JAIL_INDEX, GO_SALARY,
+        chanceCards: MP_CHANCE_CARDS, chestCards: MP_CHEST_CARDS } = monopolyData;
 
 function createMonopolyGame(settings) {
   const deckId = settings.deckId || 'classic';
@@ -1811,6 +1812,13 @@ function createMonopolyGame(settings) {
     houses: {},              // slug → 0..5 (5 = hotel)
     log: [],
     pendingBuy: null,
+    // Chance / Community-chest decks. Filled at startMonopolyGame.
+    chanceDeck: [],     // ids of cards remaining in the draw pile
+    chanceDiscard: [],  // ids of cards already drawn this game
+    chestDeck: [],
+    chestDiscard: [],
+    // Last card drawn (visible to all clients for ~banner overlay).
+    lastCard: null,     // { id, deck, text, slot, ts }
     // Active trade keyed on slot indices (stable across reconnects)
     activeTrade: null,
     winner: null,            // slot index of winner
@@ -1893,6 +1901,11 @@ function startMonopolyGame(room) {
   game.ownership = {};
   game.houses = {};
   game.activeTrade = null;
+  game.chanceDeck = shuffle(MP_CHANCE_CARDS.map((c) => c.id));
+  game.chanceDiscard = [];
+  game.chestDeck = shuffle(MP_CHEST_CARDS.map((c) => c.id));
+  game.chestDiscard = [];
+  game.lastCard = null;
   game.log = [];
   game.dice = null;
   game.doublesCount = 0;
@@ -2001,7 +2014,7 @@ function mpResolveSquare(room, slot) {
     mpLog(game, `${slotName} отправляется в тюрьму`);
     mpSendToJail(room, slot);
   } else if (square.type === 'chance' || square.type === 'chest') {
-    mpLog(game, `${slotName} на клетке «${square.type === 'chance' ? 'Шанс' : 'Казна'}» (без эффекта)`);
+    mpDrawCard(room, slot, square.type);
   }
 
   if (game.phase === 'playing' && slot === game.currentSlot && !ps.bankrupt) {
@@ -2029,6 +2042,82 @@ function mpComputeRent(game, square, slug, ownerSlot) {
     return (owned === 2 ? 10 : 4) * diceSum;
   }
   return 0;
+}
+
+// ============================================================
+// CHANCE / CHEST CARDS
+// ============================================================
+
+function mpFindCard(deckType, id) {
+  const list = deckType === 'chance' ? MP_CHANCE_CARDS : MP_CHEST_CARDS;
+  return list.find((c) => c.id === id) || null;
+}
+
+function mpDrawCard(room, slot, deckType) {
+  const game = room.game;
+  const deckKey = deckType === 'chance' ? 'chanceDeck' : 'chestDeck';
+  const discardKey = deckType === 'chance' ? 'chanceDiscard' : 'chestDiscard';
+  // Reshuffle discard back into deck if empty
+  if (!game[deckKey].length) {
+    game[deckKey] = shuffle(game[discardKey]);
+    game[discardKey] = [];
+  }
+  if (!game[deckKey].length) return; // no cards at all (shouldn't happen)
+  const cardId = game[deckKey].shift();
+  game[discardKey].push(cardId);
+  const card = mpFindCard(deckType, cardId);
+  if (!card) return;
+  game.lastCard = {
+    id: cardId,
+    deck: deckType,
+    text: card.text,
+    slot,
+    ts: Date.now(),
+  };
+  mpLog(game, `${mpSlotName(room, slot)} тянет ${deckType === 'chance' ? 'Шанс' : 'Казна'}: ${card.text}`);
+  mpApplyCardEffect(room, slot, card);
+}
+
+function mpApplyCardEffect(room, slot, card) {
+  const game = room.game;
+  const ps = game.slotState[slot];
+  if (!ps || ps.bankrupt) return;
+  const e = card.effect;
+  if (!e) return;
+
+  if (e.type === 'pay-bank') {
+    mpCharge(room, slot, null, e.amount, card.text);
+  } else if (e.type === 'collect-bank') {
+    ps.money += e.amount;
+  } else if (e.type === 'move-to-index') {
+    let target = e.target;
+    let steps = (target - ps.position + 40) % 40;
+    if (steps === 0) steps = 40; // do a full lap so GO bonus applies
+    mpAdvance(room, slot, steps);
+  } else if (e.type === 'move-by') {
+    const steps = e.steps;
+    if (steps > 0) {
+      mpAdvance(room, slot, steps);
+    } else if (steps < 0) {
+      let newPos = ps.position + steps;
+      while (newPos < 0) newPos += 40;
+      ps.position = newPos;
+      mpResolveSquare(room, slot);
+    }
+  } else if (e.type === 'go-to-jail') {
+    mpSendToJail(room, slot);
+  } else if (e.type === 'pay-each') {
+    const others = game.turnOrder.filter((s) => s !== slot && !game.slotState[s].bankrupt);
+    for (const other of others) {
+      if (game.slotState[slot].bankrupt) break;
+      mpCharge(room, slot, other, e.amount, card.text);
+    }
+  } else if (e.type === 'collect-each') {
+    const others = game.turnOrder.filter((s) => s !== slot && !game.slotState[s].bankrupt);
+    for (const other of others) {
+      mpCharge(room, other, slot, e.amount, card.text);
+    }
+  }
 }
 
 function mpBuildHouse(room, slot, slug) {
@@ -2408,6 +2497,7 @@ function getMonopolyState(room, playerId) {
     houses: game.houses,
     pendingBuy: isCurrent ? game.pendingBuy : null,
     activeTrade: tradeView,
+    lastCard: game.lastCard,
     log: game.log.slice(-20),
     turnOrder: game.turnOrder,
     winner: game.winner,

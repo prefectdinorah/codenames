@@ -2591,6 +2591,61 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   margin-left: 6px;
 }
 
+/* ─── Card draw banner ──────────────────────────────────── */
+@keyframes mp-card-fade {
+  0%   { opacity: 0; transform: translate(-50%, -54%) scale(0.92); }
+  10%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  90%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -48%) scale(0.98); }
+}
+.mp-card-banner {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 250;
+  cursor: pointer;
+  animation: mp-card-fade 4000ms ease-in-out forwards;
+}
+.mp-card-banner-inner {
+  background: var(--mp-tile-bg);
+  border: 0.5px solid var(--mp-ink);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(42, 36, 24, 0.35);
+  padding: 28px 36px;
+  min-width: 320px;
+  max-width: 460px;
+  text-align: center;
+  font-family: var(--mp-ui);
+}
+.mp-card-banner-label {
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+  margin-bottom: 14px;
+}
+.mp-card-banner-text {
+  font-family: var(--mp-serif);
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.3px;
+  color: var(--mp-ink);
+}
+.mp-card-banner-sub {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+  margin-top: 14px;
+}
+.mp-card-banner-chance .mp-card-banner-label { color: var(--mp-accent); }
+.mp-card-banner-chest  .mp-card-banner-label { color: #3a7d2e; }
+.mp-card-banner-chance .mp-card-banner-inner { border-color: var(--mp-accent); }
+.mp-card-banner-chest  .mp-card-banner-inner { border-color: #3a7d2e; }
+
 @media (max-width: 700px) {
   .mp-trade-grid { grid-template-columns: 1fr; }
   .mp-modal { max-height: 96vh; }

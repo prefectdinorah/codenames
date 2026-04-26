@@ -1412,6 +1412,11 @@ let mpDiceContainer = null;
 let mpPrevDice = null;
 let mpDiceAnimToken = 0;
 
+// Chance/Chest card overlay state.
+let mpLastSeenCardKey;          // undefined until first state arrives
+let mpCardBannerVisible = false;
+let mpCardBannerTimer = null;
+
 function mpDieDots(value) {
   const positions = {
     1: [[10, 10]],
@@ -1475,6 +1480,20 @@ function renderMonopolyArea() {
   grid.appendChild(mpBuildRightAside());
 
   area.appendChild(grid);
+
+  // Card draw banner — detect new lastCard and show for ~4s
+  const cardKey = state.lastCard ? `${state.lastCard.id}-${state.lastCard.ts}` : '';
+  if (mpLastSeenCardKey === undefined) {
+    mpLastSeenCardKey = cardKey;
+  } else if (cardKey && cardKey !== mpLastSeenCardKey) {
+    mpLastSeenCardKey = cardKey;
+    mpCardBannerVisible = true;
+    if (mpCardBannerTimer) clearTimeout(mpCardBannerTimer);
+    mpCardBannerTimer = setTimeout(() => { mpCardBannerVisible = false; render(); }, 4000);
+  }
+  if (mpCardBannerVisible && state.lastCard) {
+    area.appendChild(mpBuildCardBanner(state.lastCard));
+  }
 
   // Trade overlays — sit above the grid
   if (state.mpPhase === 'playing' && state.mySlot != null) {
@@ -2030,6 +2049,34 @@ function mpRenderDeedInto(aside, sq) {
   }
 
   return aside;
+}
+
+function mpBuildCardBanner(card) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-card-banner mp-card-banner-' + card.deck;
+  wrap.onclick = () => { mpCardBannerVisible = false; if (mpCardBannerTimer) clearTimeout(mpCardBannerTimer); render(); };
+
+  const inner = document.createElement('div');
+  inner.className = 'mp-card-banner-inner';
+
+  const label = document.createElement('div');
+  label.className = 'mp-card-banner-label';
+  label.textContent = card.deck === 'chance' ? 'Шанс' : 'Казна';
+  inner.appendChild(label);
+
+  const text = document.createElement('div');
+  text.className = 'mp-card-banner-text';
+  text.textContent = card.text;
+  inner.appendChild(text);
+
+  const sub = document.createElement('div');
+  sub.className = 'mp-card-banner-sub';
+  const drawerName = card.slot != null ? mpSlotDisplayName(card.slot) : '';
+  sub.textContent = drawerName ? `тянет: ${drawerName}` : '';
+  inner.appendChild(sub);
+
+  wrap.appendChild(inner);
+  return wrap;
 }
 
 function mpDeedRow(label, val) {
