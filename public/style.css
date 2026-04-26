@@ -1898,12 +1898,16 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   font-weight: 600;
   font-size: 11px;
   box-shadow: 0 2px 5px rgba(0,0,0,.28), 0 0 0 2px var(--mp-board-bg);
-  transition: left .5s cubic-bezier(.4,1.4,.5,1), top .5s cubic-bezier(.4,1.4,.5,1);
+  transition: left 170ms cubic-bezier(.5,1.6,.5,1), top 170ms cubic-bezier(.5,1.6,.5,1);
   z-index: 10;
   transform: translate(-50%, -50%);
+  will-change: left, top;
 }
 .mp-token-active {
   box-shadow: 0 2px 5px rgba(0,0,0,.28), 0 0 0 2px var(--mp-board-bg), 0 0 0 4px rgba(184, 92, 62, 0.5);
+}
+.mp-token-bankrupt {
+  display: none;
 }
 
 /* Sidebar */
@@ -2308,6 +2312,15 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 }
 .mp-die-svg.is-empty { background: transparent; border-style: dashed; opacity: 0.5; }
 .mp-die-svg circle { fill: var(--mp-ink); }
+
+@keyframes mp-die-jitter-a { 0% { transform: rotate(-8deg) translateY(-1px); } 50% { transform: rotate(6deg) translateY(1px); } 100% { transform: rotate(-4deg) translateY(0); } }
+@keyframes mp-die-jitter-b { 0% { transform: rotate(7deg) translateY(1px); } 50% { transform: rotate(-5deg) translateY(-1px); } 100% { transform: rotate(3deg) translateY(0); } }
+.mp-action-dice.is-rolling .mp-die-svg:nth-child(1) {
+  animation: mp-die-jitter-a 200ms ease-in-out infinite;
+}
+.mp-action-dice.is-rolling .mp-die-svg:nth-child(2) {
+  animation: mp-die-jitter-b 240ms ease-in-out infinite;
+}
 
 /* CTA buttons in action bar */
 .mp-cta {

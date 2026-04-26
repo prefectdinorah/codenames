@@ -1385,6 +1385,21 @@ let mpTradeOpen = false;
 let mpTradeDraft = null;  // { toId, fromMoney, toMoney, fromSlugs:Set, toSlugs:Set }
 let mpTradeError = '';
 
+// Token animation state.
+// Tokens persist across renders so CSS transitions and step-by-step walking work.
+let mpTokenLayer = null;      // <div class="mp-tokens-layer">
+const mpTokens = {};          // pid → element
+const mpDisplayed = {};       // pid → currently shown board position (0-39)
+const mpAnimating = {};       // pid → true while walking
+const mpPendingTarget = {};   // pid → latest target if a move arrived during animation
+const MP_STEP_MS = 180;       // per-tile walking delay (matches token CSS transition)
+const MP_JUMP_MS = 320;       // direct slide duration for big jumps
+
+// Dice animation state — persistent dice container so animations span renders.
+let mpDiceContainer = null;
+let mpPrevDice = null;
+let mpDiceAnimToken = 0;
+
 function mpDieDots(value) {
   const positions = {
     1: [[10, 10]],
@@ -1654,7 +1669,8 @@ function mpBuildBoardCol(you) {
   center.appendChild(sub);
 
   board.appendChild(center);
-  board.appendChild(mpBuildTokenLayer());
+  mpEnsureTokenLayer(board);
+  mpUpdateTokens();
 
   boardWrap.appendChild(board);
   col.appendChild(boardWrap);
@@ -1696,13 +1712,9 @@ function mpBuildActionBar(you) {
   status.appendChild(name);
   bar.appendChild(status);
 
-  // Dice
-  const diceBox = document.createElement('div');
-  diceBox.className = 'mp-action-dice';
-  const d1 = state.dice ? state.dice[0] : 0;
-  const d2 = state.dice ? state.dice[1] : 0;
-  diceBox.innerHTML = mpDieDots(d1) + mpDieDots(d2);
-  bar.appendChild(diceBox);
+  // Dice (persistent across renders so animation can span them)
+  mpEnsureDice(bar);
+  mpUpdateDice();
 
   // Action buttons
   const btns = document.createElement('div');
@@ -2443,43 +2455,180 @@ function mpBuildTile(sq) {
   return tile;
 }
 
-function mpBuildTokenLayer() {
-  const layer = document.createElement('div');
-  layer.className = 'mp-tokens-layer';
+// Persistent token layer — created once per session, reattached to the
+// current board element on every render so tokens survive board rebuilds.
+function mpEnsureTokenLayer(boardEl) {
+  if (!mpTokenLayer || !mpTokenLayer.isConnected) {
+    if (!mpTokenLayer) {
+      mpTokenLayer = document.createElement('div');
+      mpTokenLayer.className = 'mp-tokens-layer';
+    }
+  }
+  if (mpTokenLayer.parentElement !== boardEl) {
+    boardEl.appendChild(mpTokenLayer);
+  }
+  return mpTokenLayer;
+}
 
-  // Stack offsets when multiple tokens on same tile
-  const byTile = {};
-  for (const pid of state.turnOrder) {
-    const ps = state.playerState[pid];
-    if (!ps || ps.bankrupt) continue;
-    (byTile[ps.position] = byTile[ps.position] || []).push(pid);
+function mpUpdateTokens() {
+  if (!mpTokenLayer) return;
+  const present = new Set(state.turnOrder);
+
+  // Remove tokens for players no longer in turnOrder (game restart, etc.)
+  for (const pid of Object.keys(mpTokens)) {
+    if (!present.has(pid)) {
+      mpTokens[pid].remove();
+      delete mpTokens[pid];
+      delete mpDisplayed[pid];
+      delete mpAnimating[pid];
+      delete mpPendingTarget[pid];
+    }
   }
 
+  // Ensure a token element exists for each player & sync look
   for (const pid of state.turnOrder) {
     const ps = state.playerState[pid];
-    if (!ps || ps.bankrupt) continue;
+    if (!ps) continue;
     const p = state.players.find((pp) => pp.id === pid);
-    if (!p) continue;
-    const { x, y } = mpTileCenterPct(ps.position);
-    const stack = byTile[ps.position];
-    const idx = stack.indexOf(pid);
-    const off = (idx - (stack.length - 1) / 2) * 2.2; // in % units
-    const edge = mpTileEdge(ps.position);
+    let tok = mpTokens[pid];
+    if (!tok) {
+      tok = document.createElement('div');
+      tok.className = 'mp-token';
+      tok.dataset.pid = pid;
+      mpTokenLayer.appendChild(tok);
+      mpTokens[pid] = tok;
+    }
+    tok.style.background = mpTokenColor(pid);
+    tok.title = p ? p.name : '';
+    tok.textContent = mpTokenLetter(p ? p.name : '?');
+    tok.classList.toggle('mp-token-active', pid === state.currentPlayerId && state.mpPhase === 'playing');
+    tok.classList.toggle('mp-token-bankrupt', !!ps.bankrupt);
+
+    // First-time appearance: snap to current server position with no animation
+    if (mpDisplayed[pid] === undefined) {
+      mpDisplayed[pid] = ps.position;
+    } else if (mpDisplayed[pid] !== ps.position) {
+      // Server's position differs from what's drawn → animate (or queue if mid-walk)
+      mpStartWalk(pid, ps.position);
+    }
+  }
+
+  // Re-place every token using the currently displayed positions (handles stack offsets)
+  mpPlaceAllTokens();
+}
+
+function mpPlaceAllTokens() {
+  // Compute per-tile stacks from currently-displayed positions
+  const byTile = {};
+  for (const pid of Object.keys(mpTokens)) {
+    const pos = mpDisplayed[pid];
+    if (pos === undefined) continue;
+    (byTile[pos] = byTile[pos] || []).push(pid);
+  }
+  for (const pid of Object.keys(mpTokens)) {
+    const tok = mpTokens[pid];
+    const pos = mpDisplayed[pid];
+    if (pos === undefined) continue;
+    const stack = byTile[pos] || [];
+    const idx = Math.max(0, stack.indexOf(pid));
+    const off = (idx - (stack.length - 1) / 2) * 2.2;
+    const edge = mpTileEdge(pos);
     let ox = 0, oy = 0;
     if (edge === 'bottom' || edge === 'top') ox = off;
     else if (edge === 'left' || edge === 'right') oy = off;
     else { ox = off * 0.7; oy = off * 0.7; }
-    const tok = document.createElement('div');
-    tok.className = 'mp-token';
-    if (pid === state.currentPlayerId) tok.classList.add('mp-token-active');
-    tok.style.background = mpTokenColor(pid);
+    const { x, y } = mpTileCenterPct(pos);
     tok.style.left = (x + ox) + '%';
     tok.style.top = (y + oy) + '%';
-    tok.title = p.name;
-    tok.textContent = mpTokenLetter(p.name);
-    layer.appendChild(tok);
   }
-  return layer;
+}
+
+function mpEnsureDice(holder) {
+  if (!mpDiceContainer) {
+    mpDiceContainer = document.createElement('div');
+    mpDiceContainer.className = 'mp-action-dice';
+    mpDiceContainer.innerHTML = mpDieDots(0) + mpDieDots(0);
+  }
+  if (mpDiceContainer.parentElement !== holder) {
+    holder.appendChild(mpDiceContainer);
+  }
+}
+
+function mpRenderDiceFinal(d1, d2) {
+  if (!mpDiceContainer) return;
+  mpDiceContainer.classList.remove('is-rolling');
+  mpDiceContainer.innerHTML = mpDieDots(d1) + mpDieDots(d2);
+}
+
+function mpUpdateDice() {
+  if (!mpDiceContainer) return;
+  const cur = state.dice;
+  const prev = mpPrevDice;
+  if (!cur) {
+    mpDiceAnimToken++; // cancel any in-flight animation
+    mpDiceContainer.classList.remove('is-rolling');
+    mpDiceContainer.innerHTML = mpDieDots(0) + mpDieDots(0);
+    mpPrevDice = null;
+    return;
+  }
+  const changed = !prev || prev[0] !== cur[0] || prev[1] !== cur[1];
+  if (!changed) {
+    mpRenderDiceFinal(cur[0], cur[1]);
+    return;
+  }
+  mpPrevDice = [cur[0], cur[1]];
+  // Roll animation: cycle random faces ~700ms, then settle on real value
+  const myToken = ++mpDiceAnimToken;
+  const start = performance.now();
+  const duration = 700;
+  mpDiceContainer.classList.add('is-rolling');
+  const tick = () => {
+    if (myToken !== mpDiceAnimToken) return;
+    if (!mpDiceContainer) return;
+    const elapsed = performance.now() - start;
+    if (elapsed >= duration) {
+      mpRenderDiceFinal(cur[0], cur[1]);
+      return;
+    }
+    const r1 = 1 + Math.floor(Math.random() * 6);
+    const r2 = 1 + Math.floor(Math.random() * 6);
+    mpDiceContainer.innerHTML = mpDieDots(r1) + mpDieDots(r2);
+    setTimeout(tick, 65);
+  };
+  tick();
+}
+
+async function mpStartWalk(pid, target) {
+  // If already walking, just update the target — the running loop will pick it up
+  if (mpAnimating[pid]) {
+    mpPendingTarget[pid] = target;
+    return;
+  }
+  mpAnimating[pid] = true;
+  let from = mpDisplayed[pid];
+  let to = target;
+  while (from !== to) {
+    const dist = (to - from + 40) % 40;
+    if (dist === 0) break;
+    if (dist > 12) {
+      // Big jump (jail teleport, etc.) — slide direct
+      mpDisplayed[pid] = to;
+      mpPlaceAllTokens();
+      from = to;
+      await new Promise((r) => setTimeout(r, MP_JUMP_MS));
+    } else {
+      const next = (from + 1) % 40;
+      mpDisplayed[pid] = next;
+      mpPlaceAllTokens();
+      from = next;
+      await new Promise((r) => setTimeout(r, MP_STEP_MS));
+    }
+    if (mpPendingTarget[pid] !== undefined) {
+      to = mpPendingTarget[pid];
+      delete mpPendingTarget[pid];
+    }
+  }
+  mpAnimating[pid] = false;
 }
 
 // ============================================================
