@@ -1742,6 +1742,7 @@ function createMonopolyGame(settings) {
     deck,
     playerState: {},
     ownership: {},
+    houses: {},   // slug → 0..5 (5 = hotel)
     log: [],
     pendingBuy: null,
     winner: null,
@@ -1798,6 +1799,7 @@ function startMonopolyGame(room) {
     };
   }
   game.ownership = {};
+  game.houses = {};
   game.log = [];
   game.dice = null;
   game.doublesCount = 0;
@@ -1921,6 +1923,8 @@ function mpComputeRent(game, square, slug, ownerId) {
     const prop = deck.properties[slug];
     const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
     const ownsAll = groupSlugs.every((s) => game.ownership[s] === ownerId);
+    const houses = game.houses[slug] || 0;
+    if (houses > 0) return prop.rent[houses] || prop.rent[prop.rent.length - 1];
     return ownsAll ? prop.rent[0] * 2 : prop.rent[0];
   }
   if (square.type === 'transport') {
@@ -1933,6 +1937,62 @@ function mpComputeRent(game, square, slug, ownerId) {
     return (owned === 2 ? 10 : 4) * diceSum;
   }
   return 0;
+}
+
+// Build a house (or hotel at level 5) on a property.
+// Rules: must own all of the group, even-build (cannot exceed min in group by more than 1),
+// max 5 (hotel), enough money, no pendingBuy mid-action.
+function mpBuildHouse(room, playerId, slug) {
+  const game = room.game;
+  if (game.phase !== 'playing') return;
+  if (playerId !== game.currentPlayerId) return;
+  if (game.pendingBuy) return;
+  if (game.turn === 'jail-decision') return;
+  const deck = game.deck;
+  const prop = deck.properties[slug];
+  if (!prop) return;
+  if (game.ownership[slug] !== playerId) return;
+  const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
+  if (!groupSlugs.every((s) => game.ownership[s] === playerId)) return;
+  const cur = game.houses[slug] || 0;
+  if (cur >= 5) return;
+  // Even-build: this slug's level must be the min (or tied for min) in the group
+  const minInGroup = Math.min(...groupSlugs.map((s) => game.houses[s] || 0));
+  if (cur > minInGroup) return;
+  const cost = prop.house || 0;
+  const ps = game.playerState[playerId];
+  if (ps.money < cost) return;
+  ps.money -= cost;
+  game.houses[slug] = cur + 1;
+  const next = game.houses[slug];
+  const what = next === 5 ? 'отель' : `${next} ${next === 1 ? 'дом' : 'дома'}`;
+  mpLog(game, `${mpPlayerName(room, playerId)} строит на «${prop.name}» (теперь ${what}), −${cost}`);
+}
+
+// Sell one house. Even-sell: this slug's level must be the max in the group.
+// Refund half the house price (rounded down).
+function mpSellHouse(room, playerId, slug) {
+  const game = room.game;
+  if (game.phase !== 'playing') return;
+  if (playerId !== game.currentPlayerId) return;
+  if (game.pendingBuy) return;
+  if (game.turn === 'jail-decision') return;
+  const deck = game.deck;
+  const prop = deck.properties[slug];
+  if (!prop) return;
+  if (game.ownership[slug] !== playerId) return;
+  const cur = game.houses[slug] || 0;
+  if (cur <= 0) return;
+  const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
+  const maxInGroup = Math.max(...groupSlugs.map((s) => game.houses[s] || 0));
+  if (cur < maxInGroup) return;
+  const refund = Math.floor((prop.house || 0) / 2);
+  const ps = game.playerState[playerId];
+  ps.money += refund;
+  game.houses[slug] = cur - 1;
+  const left = game.houses[slug];
+  const what = left === 0 ? 'без построек' : left === 5 ? 'отель' : `${left} ${left === 1 ? 'дом' : 'дома'}`;
+  mpLog(game, `${mpPlayerName(room, playerId)} продаёт постройку на «${prop.name}» (теперь ${what}), +${refund}`);
 }
 
 function mpCharge(room, fromId, toId, amount, label) {
@@ -1959,6 +2019,8 @@ function mpBankrupt(room, playerId, creditorId) {
   ps.money = 0;
   for (const slug of Object.keys(game.ownership)) {
     if (game.ownership[slug] === playerId) {
+      // Houses revert to bank regardless of who claims the property
+      if (game.houses[slug]) delete game.houses[slug];
       if (creditorId) game.ownership[slug] = creditorId;
       else delete game.ownership[slug];
     }
@@ -2080,6 +2142,7 @@ function mpSerializeBoard(game) {
           out.group = info.group;
           out.color = deck.groups[info.group]?.color || '#888';
           out.rent = info.rent;
+          out.house = info.house || 0;
         }
         out.image = mpLogoUrl(game, info);
       }
@@ -2101,6 +2164,7 @@ function getMonopolyState(room, playerId) {
     doublesCount: game.doublesCount,
     playerState: game.playerState,
     ownership: game.ownership,
+    houses: game.houses,
     pendingBuy: playerId === game.currentPlayerId ? game.pendingBuy : null,
     log: game.log.slice(-20),
     turnOrder: game.turnOrder,
@@ -2175,6 +2239,18 @@ function handleMonopolyMsg(room, playerId, msg) {
 
   if (msg.type === 'pay-jail') {
     mpPayJail(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'build-house') {
+    mpBuildHouse(room, playerId, String(msg.slug || ''));
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'sell-house') {
+    mpSellHouse(room, playerId, String(msg.slug || ''));
     broadcastRoom(room);
     return;
   }

@@ -1713,12 +1713,20 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   pointer-events: none;
 }
 .mp-tile-house {
-  width: 4px;
-  height: 4px;
-  background: var(--mp-ink);
-  border-radius: 0.5px;
+  width: 5px;
+  height: 5px;
+  background: #2ecc71;
+  border-radius: 1px;
+  box-shadow: 0 0.5px 1px rgba(0,0,0,0.3);
 }
 .mp-tile[data-owner-color] .mp-tile-house { background: var(--mp-owner-color); }
+.mp-tile-hotel {
+  width: 14px;
+  height: 8px;
+  background: #c95a2e;
+  border-radius: 1px;
+  box-shadow: 0 0.5px 1.5px rgba(0,0,0,0.4);
+}
 
 /* Corner tiles — card body inset by TAB_HEIGHT on two outer sides */
 .mp-tile-corner .mp-corner-body {
@@ -2221,10 +2229,25 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   border-bottom: 0.5px solid var(--mp-hairline);
 }
 .mp-rent-row:last-child { border-bottom: 0; }
-.mp-rent-row.is-current { color: var(--mp-ink); font-weight: 500; }
+.mp-rent-row.is-current { color: var(--mp-ink); font-weight: 500; background: rgba(201, 90, 46, 0.08); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 3px; border-bottom-color: transparent; }
 .mp-rent-row.is-current .mp-rent-label { font-weight: 600; }
 .mp-rent-label { color: var(--mp-muted-ink); }
-.mp-rent-val { color: var(--mp-ink); }
+.mp-rent-val { color: var(--mp-ink); display: inline-flex; align-items: baseline; gap: 4px; }
+.mp-rent-note { font-size: 9px; color: var(--mp-accent); letter-spacing: 0.5px; }
+
+.mp-deed-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--mp-hairline);
+}
+.mp-deed-actions .mp-cta {
+  flex: 1;
+  padding: 9px 10px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
 
 /* Bottom action bar */
 .mp-action-bar {

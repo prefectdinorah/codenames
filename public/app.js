@@ -1855,10 +1855,12 @@ function mpRenderDeedInto(aside, sq) {
   if (sq.type === 'property' || sq.type === 'transport' || sq.type === 'utility') {
     const ownerId = sq.slug ? state.ownership[sq.slug] : null;
     const ownerP = ownerId ? state.players.find((pp) => pp.id === ownerId) : null;
+    const houses = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
     rows.appendChild(mpDeedRow('Цена', `<span class="mp-cur">${MP_CURRENCY}</span>${sq.price}`));
     rows.appendChild(mpDeedRow('Владелец', ownerP ? ownerP.name : '—'));
     if (sq.type === 'property') {
-      rows.appendChild(mpDeedRow('Домов', '0'));
+      const housesText = houses === 5 ? 'Отель' : `${houses}`;
+      rows.appendChild(mpDeedRow('Домов', housesText));
     }
   } else if (sq.type === 'tax') {
     rows.appendChild(mpDeedRow('Сумма', `<span class="mp-cur">−${MP_CURRENCY}</span>${sq.amount}`));
@@ -1878,14 +1880,56 @@ function mpRenderDeedInto(aside, sq) {
     const rentTable = document.createElement('div');
     rentTable.className = 'mp-rent-table';
     const labels = ['База', '1 дом', '2 дома', '3 дома', '4 дома', 'Отель'];
+    const houses = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
+    const ownerId = sq.slug ? state.ownership[sq.slug] : null;
+    // Owner without houses + full group → 2× base rent (highlight that fact)
+    const ownsAllInGroup = ownerId && state.board
+      .filter((s) => s.type === 'property' && s.group === sq.group)
+      .every((s) => state.ownership[s.slug] === ownerId);
     for (let i = 0; i < sq.rent.length; i++) {
       const r = document.createElement('div');
       r.className = 'mp-rent-row';
-      if (i === 0) r.classList.add('is-current');
-      r.innerHTML = `<span class="mp-rent-label">${labels[i]}</span><span class="mp-rent-val"><span class="mp-cur">${MP_CURRENCY}</span>${sq.rent[i]}</span>`;
+      if (i === houses) r.classList.add('is-current');
+      const isBaseDouble = i === 0 && houses === 0 && ownsAllInGroup;
+      const value = isBaseDouble ? sq.rent[0] * 2 : sq.rent[i];
+      const note = isBaseDouble ? ' <span class="mp-rent-note">×2</span>' : '';
+      r.innerHTML = `<span class="mp-rent-label">${labels[i]}</span><span class="mp-rent-val"><span class="mp-cur">${MP_CURRENCY}</span>${value}${note}</span>`;
       rentTable.appendChild(r);
     }
     aside.appendChild(rentTable);
+
+    // Build/sell controls — only for the current player on their own property when they own the group
+    const you = state.you;
+    const isMine = ownerId && you && ownerId === you.id;
+    const isMyTurn = you && you.id === state.currentPlayerId && state.mpPhase === 'playing';
+    if (isMine && isMyTurn && ownsAllInGroup && !state.pendingBuy) {
+      const groupSlugs = state.board.filter((s) => s.type === 'property' && s.group === sq.group).map((s) => s.slug);
+      const groupHouses = groupSlugs.map((s) => (state.houses && state.houses[s]) || 0);
+      const minInGroup = Math.min(...groupHouses);
+      const maxInGroup = Math.max(...groupHouses);
+      const ps = state.playerState[you.id];
+
+      const canBuild = houses < 5 && houses === minInGroup && ps && ps.money >= (state.deedHouseCost || 0);
+      const canSell = houses > 0 && houses === maxInGroup;
+      // We need the house cost — it's in the deck, not directly on the tile. Pull from board square if present.
+      const houseCost = sq.house || 0;
+
+      const ctrls = document.createElement('div');
+      ctrls.className = 'mp-deed-actions';
+      const buildBtn = document.createElement('button');
+      buildBtn.className = 'mp-cta mp-cta-primary';
+      buildBtn.textContent = houses === 4 ? `Отель · ${MP_CURRENCY}${houseCost}` : `Дом · ${MP_CURRENCY}${houseCost}`;
+      buildBtn.disabled = !(houses < 5 && houses === minInGroup && ps && ps.money >= houseCost);
+      buildBtn.onclick = () => send({ type: 'build-house', slug: sq.slug });
+      ctrls.appendChild(buildBtn);
+      const sellBtn = document.createElement('button');
+      sellBtn.className = 'mp-cta mp-cta-secondary';
+      sellBtn.textContent = `Продать · +${MP_CURRENCY}${Math.floor(houseCost / 2)}`;
+      sellBtn.disabled = !canSell;
+      sellBtn.onclick = () => send({ type: 'sell-house', slug: sq.slug });
+      ctrls.appendChild(sellBtn);
+      aside.appendChild(ctrls);
+    }
   }
 
   // Transport rent ladder
@@ -2009,14 +2053,21 @@ function mpBuildTile(sq) {
   name.textContent = sq.name || '';
   card.appendChild(name);
 
-  // Houses (V1: always 0; reserved for V2)
-  if (sq.houses && sq.houses > 0) {
+  // Houses / hotel from current state
+  const houseCount = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
+  if (houseCount > 0) {
     const houses = document.createElement('div');
     houses.className = 'mp-tile-houses';
-    for (let k = 0; k < sq.houses; k++) {
-      const h = document.createElement('div');
-      h.className = 'mp-tile-house';
-      houses.appendChild(h);
+    if (houseCount === 5) {
+      const hotel = document.createElement('div');
+      hotel.className = 'mp-tile-hotel';
+      houses.appendChild(hotel);
+    } else {
+      for (let k = 0; k < houseCount; k++) {
+        const h = document.createElement('div');
+        h.className = 'mp-tile-house';
+        houses.appendChild(h);
+      }
     }
     card.appendChild(houses);
   }
