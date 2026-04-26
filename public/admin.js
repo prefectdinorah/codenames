@@ -220,21 +220,30 @@
     const deck = adm.currentDeck;
     const locked = deck.locked;
 
+    // Header — back button + deck name + save
     const header = document.createElement('div');
     header.className = 'admin-editor-header';
 
     const back = document.createElement('button');
+    back.className = 'admin-btn-ghost';
     back.textContent = '← К списку';
     back.onclick = () => { adm.currentDeck = null; adm.editingCellIndex = null; renderDecksTab(); };
     header.appendChild(back);
 
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'admin-deck-name-wrap';
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'admin-section-label';
+    nameLabel.textContent = 'Колода';
+    nameWrap.appendChild(nameLabel);
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.value = deck.name;
     nameInput.disabled = locked;
     nameInput.className = 'admin-deck-name-input';
     nameInput.oninput = () => { deck.name = nameInput.value; };
-    header.appendChild(nameInput);
+    nameWrap.appendChild(nameInput);
+    header.appendChild(nameWrap);
 
     if (!locked) {
       const saveBtn = document.createElement('button');
@@ -258,23 +267,23 @@
     }
     root.appendChild(header);
 
-    // Groups editor
-    root.appendChild(renderGroupsEditor(deck, locked));
-
-    // Board grid + cell editor
-    const body = document.createElement('div');
-    body.className = 'admin-editor-body';
+    // Board (centered, large)
+    const boardWrap = document.createElement('div');
+    boardWrap.className = 'admin-board-wrap';
     const boardBox = document.createElement('div');
     boardBox.className = 'admin-board-minigrid';
     renderBoardGrid(boardBox, deck, locked);
-    body.appendChild(boardBox);
+    boardWrap.appendChild(boardBox);
+    root.appendChild(boardWrap);
 
+    // Cell editor — below the board, full width
     const cellBox = document.createElement('div');
     cellBox.className = 'admin-cell-editor';
     renderCellEditor(cellBox, deck, locked);
-    body.appendChild(cellBox);
+    root.appendChild(cellBox);
 
-    root.appendChild(body);
+    // Groups editor — collapsible at the bottom
+    root.appendChild(renderGroupsEditor(deck, locked));
   }
 
   function renderGroupsEditor(deck, locked) {
@@ -403,23 +412,34 @@
   function renderCellEditor(root, deck, locked) {
     root.innerHTML = '';
     if (adm.editingCellIndex === null) {
-      root.innerHTML = '<div class="admin-cell-empty">Кликни клетку для редактирования</div>';
+      root.innerHTML = '<div class="admin-cell-empty">Кликни клетку на доске, чтобы её отредактировать</div>';
       return;
     }
     const idx = adm.editingCellIndex;
     const sq = deck.board[idx];
+    const TYPE_LABELS = {
+      property: 'Компания', transport: 'Транспорт', utility: 'Ресурс', tax: 'Налог',
+      chance: 'Шанс', chest: 'Казна', go: 'Старт', jail: 'Тюрьма',
+      go_to_jail: 'В тюрьму', parking: 'Парковка',
+    };
+
     const h = document.createElement('h3');
-    h.textContent = `Клетка #${idx}`;
+    h.textContent = `Клетка #${idx} · ${cellDisplayName(deck, sq)}`;
     root.appendChild(h);
+
+    const grid = document.createElement('div');
+    grid.className = 'admin-cell-editor-grid';
+    root.appendChild(grid);
 
     // Type selector
     const typeLabel = document.createElement('label');
-    typeLabel.textContent = 'Тип: ';
+    typeLabel.className = 'admin-field';
+    typeLabel.textContent = 'Тип клетки';
     const typeSel = document.createElement('select');
     typeSel.disabled = locked;
     for (const t of ['property', 'transport', 'utility', 'tax', 'chance', 'chest', 'go', 'jail', 'go_to_jail', 'parking']) {
       const opt = document.createElement('option');
-      opt.value = t; opt.textContent = t;
+      opt.value = t; opt.textContent = TYPE_LABELS[t] || t;
       if (t === sq.type) opt.selected = true;
       typeSel.appendChild(opt);
     }
@@ -449,20 +469,18 @@
       renderDeckEditor($('#admin-tab-decks'));
     };
     typeLabel.appendChild(typeSel);
-    root.appendChild(typeLabel);
+    grid.appendChild(typeLabel);
 
-    // Fields by type
     const info = cellInfo(deck, sq);
     if (info) {
-      // Shared: name, price, logo
-      root.appendChild(textField('Название', info.name, locked, (v) => { info.name = v; refreshGrid(); }));
-      root.appendChild(numberField('Цена', info.price, locked, (v) => { info.price = v; }));
-      root.appendChild(logoPickerField(info, locked));
+      grid.appendChild(textField('Название', info.name, locked, (v) => { info.name = v; refreshGrid(); }));
+      grid.appendChild(numberField('Цена', info.price, locked, (v) => { info.price = v; }));
 
       if (sq.type === 'property') {
         // Group
         const grpLabel = document.createElement('label');
-        grpLabel.textContent = 'Группа: ';
+        grpLabel.className = 'admin-field';
+        grpLabel.textContent = 'Группа';
         const grpSel = document.createElement('select');
         grpSel.disabled = locked;
         for (const [gid, g] of Object.entries(deck.groups)) {
@@ -473,31 +491,33 @@
         }
         grpSel.onchange = () => { info.group = grpSel.value; refreshGrid(); };
         grpLabel.appendChild(grpSel);
-        root.appendChild(grpLabel);
+        grid.appendChild(grpLabel);
 
-        // Rent array
+        grid.appendChild(numberField('Стоимость дома', info.house || 0, locked, (v) => { info.house = v; }));
+
+        const rentTitle = document.createElement('div');
+        rentTitle.className = 'admin-subtitle';
+        rentTitle.textContent = 'Рента по уровню застройки';
+        grid.appendChild(rentTitle);
+
         const rentBox = document.createElement('div');
         rentBox.className = 'admin-rent-grid';
         const rentLabels = ['База', '1 дом', '2 дома', '3 дома', '4 дома', 'Отель'];
         for (let r = 0; r < 6; r++) {
           rentBox.appendChild(numberField(rentLabels[r], info.rent[r] || 0, locked, (v) => { info.rent[r] = v; }));
         }
-        const rentTitle = document.createElement('div');
-        rentTitle.className = 'admin-subtitle';
-        rentTitle.textContent = 'Рента';
-        root.appendChild(rentTitle);
-        root.appendChild(rentBox);
-
-        root.appendChild(numberField('Стоимость дома', info.house || 0, locked, (v) => { info.house = v; }));
+        grid.appendChild(rentBox);
       }
+
+      grid.appendChild(logoPickerField(info, locked));
     } else if (sq.type === 'tax') {
-      root.appendChild(textField('Название', sq.name || '', locked, (v) => { sq.name = v; refreshGrid(); }));
-      root.appendChild(numberField('Сумма', sq.amount || 0, locked, (v) => { sq.amount = v; }));
+      grid.appendChild(textField('Название', sq.name || '', locked, (v) => { sq.name = v; refreshGrid(); }));
+      grid.appendChild(numberField('Сумма', sq.amount || 0, locked, (v) => { sq.amount = v; }));
     } else {
       const note = document.createElement('div');
       note.className = 'admin-note';
       note.textContent = 'У этого типа нет редактируемых полей.';
-      root.appendChild(note);
+      grid.appendChild(note);
     }
 
     function refreshGrid() {
