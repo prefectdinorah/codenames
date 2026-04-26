@@ -1792,6 +1792,8 @@ function createMonopolyGame(settings) {
     houses: {},   // slug → 0..5 (5 = hotel)
     log: [],
     pendingBuy: null,
+    // Active trade: { id, fromId, toId, fromOffer:{money,slugs[]}, toOffer:{money,slugs[]}, status: 'pending' }
+    activeTrade: null,
     winner: null,
     paused: false,
     timerEnd: null,
@@ -1847,6 +1849,7 @@ function startMonopolyGame(room) {
   }
   game.ownership = {};
   game.houses = {};
+  game.activeTrade = null;
   game.log = [];
   game.dice = null;
   game.doublesCount = 0;
@@ -2059,6 +2062,144 @@ function mpCharge(room, fromId, toId, amount, label) {
   mpLog(game, `${fromName} платит ${amount} → ${toName} за «${label}»`);
 }
 
+// ============================================================
+// TRADES
+// ============================================================
+let nextTradeId = 1;
+
+// Helper: list every slug a player owns (property + transport + utility).
+function mpAllSlugs(deck) {
+  return [
+    ...Object.keys(deck.properties),
+    ...Object.keys(deck.transport),
+    ...Object.keys(deck.utilities),
+  ];
+}
+
+function mpSlugType(deck, slug) {
+  if (deck.properties[slug]) return 'property';
+  if (deck.transport[slug]) return 'transport';
+  if (deck.utilities[slug]) return 'utility';
+  return null;
+}
+
+// Trade-eligible: properties whose group has any houses are blocked
+// (owner must sell houses first). Transport/utility are always OK.
+function mpTradeBlocked(game, slug) {
+  const deck = game.deck;
+  const t = mpSlugType(deck, slug);
+  if (t !== 'property') return false;
+  const prop = deck.properties[slug];
+  const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
+  return groupSlugs.some((s) => (game.houses[s] || 0) > 0);
+}
+
+function mpValidateOffer(room, ownerId, offer) {
+  const game = room.game;
+  if (!offer || typeof offer !== 'object') return 'плохое предложение';
+  const money = parseInt(offer.money, 10) || 0;
+  if (money < 0) return 'отрицательные деньги';
+  const ps = game.playerState[ownerId];
+  if (!ps || ps.bankrupt) return 'игрок не в игре';
+  if (ps.money < money) return `у ${mpPlayerName(room, ownerId)} недостаточно денег`;
+  const slugs = Array.isArray(offer.slugs) ? offer.slugs : [];
+  for (const slug of slugs) {
+    if (game.ownership[slug] !== ownerId) return `${slug} не принадлежит игроку`;
+    if (mpTradeBlocked(game, slug)) return `на «${game.deck.properties[slug]?.name || slug}» (или в её группе) есть постройки`;
+  }
+  return null;
+}
+
+function mpProposeTrade(room, fromId, msg) {
+  const game = room.game;
+  if (game.phase !== 'playing') return;
+  if (game.activeTrade) return; // one at a time
+  const fromPs = game.playerState[fromId];
+  if (!fromPs || fromPs.bankrupt) return;
+  const toId = String(msg.toId || '');
+  if (!toId || toId === fromId) return;
+  const toPs = game.playerState[toId];
+  if (!toPs || toPs.bankrupt) return;
+
+  const fromOffer = {
+    money: Math.max(0, parseInt(msg.fromMoney, 10) || 0),
+    slugs: Array.isArray(msg.fromSlugs) ? msg.fromSlugs.map(String) : [],
+  };
+  const toOffer = {
+    money: Math.max(0, parseInt(msg.toMoney, 10) || 0),
+    slugs: Array.isArray(msg.toSlugs) ? msg.toSlugs.map(String) : [],
+  };
+
+  if (fromOffer.money === 0 && fromOffer.slugs.length === 0
+      && toOffer.money === 0 && toOffer.slugs.length === 0) return; // empty trade
+
+  const errFrom = mpValidateOffer(room, fromId, fromOffer);
+  const errTo = mpValidateOffer(room, toId, toOffer);
+  if (errFrom || errTo) {
+    // Send only to the proposer so they know why
+    const player = room.players.get(fromId);
+    if (player && player.ws && player.ws.readyState === 1) {
+      player.ws.send(JSON.stringify({ type: 'trade-error', message: errFrom || errTo }));
+    }
+    return;
+  }
+
+  game.activeTrade = {
+    id: String(nextTradeId++),
+    fromId, toId,
+    fromOffer, toOffer,
+    status: 'pending',
+  };
+  const fromName = mpPlayerName(room, fromId);
+  const toName = mpPlayerName(room, toId);
+  mpLog(game, `${fromName} предлагает ${toName} сделку`);
+}
+
+function mpCancelTrade(room, playerId) {
+  const game = room.game;
+  if (!game.activeTrade) return;
+  if (game.activeTrade.fromId !== playerId) return; // only proposer can cancel
+  mpLog(game, `${mpPlayerName(room, playerId)} отозвал предложение`);
+  game.activeTrade = null;
+}
+
+function mpRespondTrade(room, playerId, accept) {
+  const game = room.game;
+  const trade = game.activeTrade;
+  if (!trade) return;
+  if (trade.toId !== playerId) return;
+
+  if (!accept) {
+    mpLog(game, `${mpPlayerName(room, playerId)} отклонил сделку`);
+    game.activeTrade = null;
+    return;
+  }
+
+  // Re-validate just before applying — state may have shifted.
+  const errFrom = mpValidateOffer(room, trade.fromId, trade.fromOffer);
+  const errTo = mpValidateOffer(room, trade.toId, trade.toOffer);
+  if (errFrom || errTo) {
+    mpLog(game, `Сделка отменена: ${errFrom || errTo}`);
+    game.activeTrade = null;
+    return;
+  }
+
+  // Execute
+  const fromPs = game.playerState[trade.fromId];
+  const toPs = game.playerState[trade.toId];
+  fromPs.money -= trade.fromOffer.money;
+  toPs.money += trade.fromOffer.money;
+  toPs.money -= trade.toOffer.money;
+  fromPs.money += trade.toOffer.money;
+  for (const s of trade.fromOffer.slugs) game.ownership[s] = trade.toId;
+  for (const s of trade.toOffer.slugs) game.ownership[s] = trade.fromId;
+
+  const fromName = mpPlayerName(room, trade.fromId);
+  const toName = mpPlayerName(room, trade.toId);
+  mpLog(game, `Сделка между ${fromName} и ${toName} прошла`);
+  game.activeTrade = null;
+}
+
 function mpBankrupt(room, playerId, creditorId) {
   const game = room.game;
   const ps = game.playerState[playerId];
@@ -2071,6 +2212,10 @@ function mpBankrupt(room, playerId, creditorId) {
       if (creditorId) game.ownership[slug] = creditorId;
       else delete game.ownership[slug];
     }
+  }
+  // Drop any pending trade this player was part of
+  if (game.activeTrade && (game.activeTrade.fromId === playerId || game.activeTrade.toId === playerId)) {
+    game.activeTrade = null;
   }
   mpLog(game, `💀 ${mpPlayerName(room, playerId)} — БАНКРОТ`);
   mpCheckWin(room);
@@ -2213,6 +2358,8 @@ function getMonopolyState(room, playerId) {
     ownership: game.ownership,
     houses: game.houses,
     pendingBuy: playerId === game.currentPlayerId ? game.pendingBuy : null,
+    activeTrade: game.activeTrade && (game.activeTrade.fromId === playerId || game.activeTrade.toId === playerId)
+      ? game.activeTrade : (game.activeTrade ? { id: game.activeTrade.id, fromId: game.activeTrade.fromId, toId: game.activeTrade.toId, status: 'pending' } : null),
     log: game.log.slice(-20),
     turnOrder: game.turnOrder,
     winner: game.winner,
@@ -2298,6 +2445,24 @@ function handleMonopolyMsg(room, playerId, msg) {
 
   if (msg.type === 'sell-house') {
     mpSellHouse(room, playerId, String(msg.slug || ''));
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'trade-propose') {
+    mpProposeTrade(room, playerId, msg);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'trade-cancel') {
+    mpCancelTrade(room, playerId);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'trade-respond') {
+    mpRespondTrade(room, playerId, !!msg.accept);
     broadcastRoom(room);
     return;
   }

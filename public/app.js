@@ -31,6 +31,7 @@ function connect() {
     if (msg.type === 'error') { $('#join-error').textContent = msg.message; return; }
     if (msg.type === 'croc-draw') { crocDrawRemote(msg); return; }
     if (msg.type === 'croc-clear') { crocClearCanvas(); return; }
+    if (msg.type === 'trade-error') { mpTradeError = msg.message || 'не удалось отправить'; mpTradeOpen = true; render(); return; }
     if (msg.type === 'state') { state = msg; render(); }
   };
 
@@ -1379,6 +1380,11 @@ function mpTokenLetter(name) {
 // Currently-selected tile (persists across renders)
 let mpSelectedTile = null;
 
+// Trade builder UI state — only persists across renders while the modal is open.
+let mpTradeOpen = false;
+let mpTradeDraft = null;  // { toId, fromMoney, toMoney, fromSlugs:Set, toSlugs:Set }
+let mpTradeError = '';
+
 function mpDieDots(value) {
   const positions = {
     1: [[10, 10]],
@@ -1441,6 +1447,23 @@ function renderMonopolyArea() {
   grid.appendChild(mpBuildRightAside());
 
   area.appendChild(grid);
+
+  // Trade overlays — sit above the grid
+  if (state.mpPhase === 'playing' && you) {
+    const t = state.activeTrade;
+    if (t && t.toId === you.id) {
+      area.appendChild(mpBuildIncomingTradeModal(t));
+    } else if (t && t.fromId === you.id) {
+      area.appendChild(mpBuildPendingTradeBanner(t));
+    } else if (mpTradeOpen) {
+      area.appendChild(mpBuildTradeBuilderModal(you));
+    }
+  } else {
+    // Reset draft when game leaves playing
+    mpTradeOpen = false;
+    mpTradeDraft = null;
+    mpTradeError = '';
+  }
 }
 
 function mpBuildLeftAside() {
@@ -1761,6 +1784,20 @@ function mpBuildActionBar(you) {
     btns.appendChild(wait);
   }
   bar.appendChild(btns);
+
+  // Trade button — visible to any non-bankrupt active player during the game.
+  if (state.mpPhase === 'playing' && you) {
+    const ps = state.playerState[you.id];
+    const inGame = ps && !ps.bankrupt;
+    if (inGame && !state.activeTrade) {
+      const tradeBtn = document.createElement('button');
+      tradeBtn.className = 'mp-cta mp-cta-secondary mp-cta-trade';
+      tradeBtn.textContent = 'Сделка';
+      tradeBtn.onclick = () => { mpTradeOpen = true; render(); };
+      bar.appendChild(tradeBtn);
+    }
+  }
+
   return bar;
 }
 
@@ -1978,6 +2015,310 @@ function mpDeedRow(label, val) {
   r.className = 'mp-deed-row';
   r.innerHTML = `<span class="mp-deed-row-label">${label}</span><span class="mp-deed-row-val">${val}</span>`;
   return r;
+}
+
+// ============================================================
+// MONOPOLY TRADES (UI)
+// ============================================================
+
+function mpResetTradeDraft(toId) {
+  mpTradeDraft = {
+    toId: toId || null,
+    fromMoney: 0,
+    toMoney: 0,
+    fromSlugs: new Set(),
+    toSlugs: new Set(),
+  };
+}
+
+function mpListOwned(playerId) {
+  const owned = [];
+  if (!playerId || !state.ownership || !state.board) return owned;
+  for (const slug of Object.keys(state.ownership)) {
+    if (state.ownership[slug] !== playerId) continue;
+    const sq = state.board.find((s) => s.slug === slug);
+    if (sq) owned.push(sq);
+  }
+  return owned;
+}
+
+// True if any property in this property's group has houses on it.
+function mpGroupHasHouses(slug) {
+  const sq = state.board.find((s) => s.slug === slug);
+  if (!sq || sq.type !== 'property' || !sq.group) return false;
+  const groupSlugs = state.board.filter((s) => s.type === 'property' && s.group === sq.group).map((s) => s.slug);
+  return groupSlugs.some((s) => (state.houses && state.houses[s]) > 0);
+}
+
+function mpBuildTradeBuilderModal(you) {
+  const myId = you.id;
+  if (!mpTradeDraft) mpResetTradeDraft(null);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'mp-modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) { mpTradeOpen = false; mpTradeDraft = null; render(); } };
+
+  const modal = document.createElement('div');
+  modal.className = 'mp-modal mp-trade-modal';
+
+  const head = document.createElement('div');
+  head.className = 'mp-modal-head';
+  head.innerHTML = `<div class="mp-modal-title">Сделка</div><div class="mp-modal-sub">Выбери игрока и составь предложение</div>`;
+  modal.appendChild(head);
+
+  // Counterparty selector — chips
+  const otherPlayers = state.turnOrder
+    .filter((pid) => pid !== myId && state.playerState[pid] && !state.playerState[pid].bankrupt)
+    .map((pid) => ({ id: pid, name: (state.players.find((pp) => pp.id === pid) || {}).name || '?' }));
+
+  if (otherPlayers.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'mp-modal-empty';
+    empty.textContent = 'Нет других игроков';
+    modal.appendChild(empty);
+  } else {
+    const chips = document.createElement('div');
+    chips.className = 'mp-trade-chips';
+    for (const p of otherPlayers) {
+      const chip = document.createElement('button');
+      chip.className = 'mp-trade-chip' + (mpTradeDraft.toId === p.id ? ' is-active' : '');
+      chip.style.setProperty('--mp-chip-color', mpTokenColor(p.id));
+      chip.textContent = p.name;
+      chip.onclick = () => {
+        if (mpTradeDraft.toId !== p.id) {
+          // Reset selections on counterparty change
+          mpResetTradeDraft(p.id);
+        }
+        render();
+      };
+      chips.appendChild(chip);
+    }
+    modal.appendChild(chips);
+
+    if (mpTradeDraft.toId) {
+      const grid = document.createElement('div');
+      grid.className = 'mp-trade-grid';
+
+      grid.appendChild(mpBuildTradeColumn('Отдаю', myId, true));
+      grid.appendChild(mpBuildTradeColumn('Получаю', mpTradeDraft.toId, false));
+
+      modal.appendChild(grid);
+    }
+  }
+
+  if (mpTradeError) {
+    const err = document.createElement('div');
+    err.className = 'mp-modal-error';
+    err.textContent = mpTradeError;
+    modal.appendChild(err);
+  }
+
+  // Footer
+  const foot = document.createElement('div');
+  foot.className = 'mp-modal-foot';
+  const cancel = document.createElement('button');
+  cancel.className = 'mp-cta mp-cta-secondary';
+  cancel.textContent = 'Отмена';
+  cancel.onclick = () => { mpTradeOpen = false; mpTradeDraft = null; mpTradeError = ''; render(); };
+  foot.appendChild(cancel);
+
+  const submit = document.createElement('button');
+  submit.className = 'mp-cta mp-cta-primary';
+  submit.textContent = 'Отправить';
+  const draftEmpty = !mpTradeDraft.toId
+    || (mpTradeDraft.fromMoney === 0 && mpTradeDraft.toMoney === 0
+        && mpTradeDraft.fromSlugs.size === 0 && mpTradeDraft.toSlugs.size === 0);
+  submit.disabled = draftEmpty;
+  submit.onclick = () => {
+    mpTradeError = '';
+    send({
+      type: 'trade-propose',
+      toId: mpTradeDraft.toId,
+      fromMoney: mpTradeDraft.fromMoney,
+      toMoney: mpTradeDraft.toMoney,
+      fromSlugs: [...mpTradeDraft.fromSlugs],
+      toSlugs: [...mpTradeDraft.toSlugs],
+    });
+    // Note: server will set state.activeTrade or send 'trade-error'.
+    mpTradeOpen = false;
+  };
+  foot.appendChild(submit);
+  modal.appendChild(foot);
+
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+function mpBuildTradeColumn(title, ownerId, isMine) {
+  const col = document.createElement('div');
+  col.className = 'mp-trade-col';
+
+  const h = document.createElement('div');
+  h.className = 'mp-trade-col-title';
+  h.textContent = title;
+  col.appendChild(h);
+
+  const ps = state.playerState[ownerId];
+  const cap = ps ? ps.money : 0;
+
+  // Money input
+  const moneyRow = document.createElement('div');
+  moneyRow.className = 'mp-trade-money';
+  const moneyLabel = document.createElement('span');
+  moneyLabel.className = 'mp-trade-money-label';
+  moneyLabel.textContent = `Деньги (макс ${MP_CURRENCY}${cap})`;
+  moneyRow.appendChild(moneyLabel);
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.max = String(cap);
+  input.value = String(isMine ? mpTradeDraft.fromMoney : mpTradeDraft.toMoney);
+  input.oninput = () => {
+    let v = parseInt(input.value, 10);
+    if (!Number.isFinite(v) || v < 0) v = 0;
+    if (v > cap) v = cap;
+    if (isMine) mpTradeDraft.fromMoney = v;
+    else mpTradeDraft.toMoney = v;
+  };
+  input.onblur = () => render();
+  moneyRow.appendChild(input);
+  col.appendChild(moneyRow);
+
+  // Property list
+  const list = document.createElement('div');
+  list.className = 'mp-trade-list';
+  const owned = mpListOwned(ownerId);
+  if (owned.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'mp-trade-empty';
+    empty.textContent = 'Нет владений';
+    list.appendChild(empty);
+  }
+  const set = isMine ? mpTradeDraft.fromSlugs : mpTradeDraft.toSlugs;
+  for (const sq of owned) {
+    const item = document.createElement('label');
+    item.className = 'mp-trade-item';
+    const blocked = sq.type === 'property' && mpGroupHasHouses(sq.slug);
+    if (blocked) item.classList.add('is-blocked');
+    if (set.has(sq.slug)) item.classList.add('is-selected');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = set.has(sq.slug);
+    cb.disabled = blocked;
+    cb.onchange = () => { if (cb.checked) set.add(sq.slug); else set.delete(sq.slug); render(); };
+    item.appendChild(cb);
+    if (sq.color) {
+      const strip = document.createElement('span');
+      strip.className = 'mp-trade-item-strip';
+      strip.style.background = sq.color;
+      item.appendChild(strip);
+    }
+    const name = document.createElement('span');
+    name.className = 'mp-trade-item-name';
+    name.textContent = sq.name;
+    if (blocked) name.title = 'на группе есть постройки';
+    item.appendChild(name);
+    list.appendChild(item);
+  }
+  col.appendChild(list);
+
+  return col;
+}
+
+function mpBuildIncomingTradeModal(trade) {
+  const overlay = document.createElement('div');
+  overlay.className = 'mp-modal-overlay';
+  // Don't allow clicking outside to close — must accept/decline
+  const modal = document.createElement('div');
+  modal.className = 'mp-modal mp-trade-modal mp-trade-incoming';
+
+  const fromName = (state.players.find((p) => p.id === trade.fromId) || {}).name || '?';
+
+  const head = document.createElement('div');
+  head.className = 'mp-modal-head';
+  head.innerHTML = `<div class="mp-modal-title">Сделка от ${esc(fromName)}</div>`;
+  modal.appendChild(head);
+
+  const grid = document.createElement('div');
+  grid.className = 'mp-trade-grid';
+  grid.appendChild(mpRenderTradeSummary('Они отдают', trade.fromOffer));
+  grid.appendChild(mpRenderTradeSummary('Вы отдаёте', trade.toOffer));
+  modal.appendChild(grid);
+
+  const foot = document.createElement('div');
+  foot.className = 'mp-modal-foot';
+  const decline = document.createElement('button');
+  decline.className = 'mp-cta mp-cta-secondary';
+  decline.textContent = 'Отклонить';
+  decline.onclick = () => send({ type: 'trade-respond', accept: false });
+  foot.appendChild(decline);
+  const accept = document.createElement('button');
+  accept.className = 'mp-cta mp-cta-primary';
+  accept.textContent = 'Принять';
+  accept.onclick = () => send({ type: 'trade-respond', accept: true });
+  foot.appendChild(accept);
+  modal.appendChild(foot);
+
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+function mpRenderTradeSummary(title, offer) {
+  const col = document.createElement('div');
+  col.className = 'mp-trade-col mp-trade-col-summary';
+  const h = document.createElement('div');
+  h.className = 'mp-trade-col-title';
+  h.textContent = title;
+  col.appendChild(h);
+
+  const m = document.createElement('div');
+  m.className = 'mp-trade-summary-money';
+  m.innerHTML = `<span class="mp-cur">${MP_CURRENCY}</span>${offer.money || 0}`;
+  col.appendChild(m);
+
+  const list = document.createElement('div');
+  list.className = 'mp-trade-list';
+  const slugs = offer.slugs || [];
+  if (slugs.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'mp-trade-empty';
+    empty.textContent = 'Без собственности';
+    list.appendChild(empty);
+  }
+  for (const slug of slugs) {
+    const sq = state.board.find((s) => s.slug === slug);
+    if (!sq) continue;
+    const item = document.createElement('div');
+    item.className = 'mp-trade-item is-summary';
+    if (sq.color) {
+      const strip = document.createElement('span');
+      strip.className = 'mp-trade-item-strip';
+      strip.style.background = sq.color;
+      item.appendChild(strip);
+    }
+    const name = document.createElement('span');
+    name.className = 'mp-trade-item-name';
+    name.textContent = sq.name;
+    item.appendChild(name);
+    list.appendChild(item);
+  }
+  col.appendChild(list);
+  return col;
+}
+
+function mpBuildPendingTradeBanner(trade) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-trade-pending-banner';
+  const toName = (state.players.find((p) => p.id === trade.toId) || {}).name || '?';
+  const text = document.createElement('span');
+  text.textContent = `Сделка отправлена ${toName}. Ждём ответа…`;
+  wrap.appendChild(text);
+  const cancel = document.createElement('button');
+  cancel.className = 'mp-cta mp-cta-secondary';
+  cancel.textContent = 'Отозвать';
+  cancel.onclick = () => send({ type: 'trade-cancel' });
+  wrap.appendChild(cancel);
+  return wrap;
 }
 
 function mpBuildTile(sq) {

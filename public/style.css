@@ -2352,6 +2352,237 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   .mp-aside-left, .mp-aside-right { max-height: none; }
 }
 
+/* ─── Trade modal ────────────────────────────────────────── */
+.mp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(42, 36, 24, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.mp-modal {
+  background: var(--mp-tile-bg);
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(42, 36, 24, 0.25);
+  max-width: 720px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--mp-ui);
+}
+.mp-trade-modal { max-width: 760px; }
+.mp-modal-head {
+  padding: 20px 24px 16px;
+  border-bottom: 0.5px solid var(--mp-hairline);
+}
+.mp-modal-title {
+  font-family: var(--mp-serif);
+  font-size: 28px;
+  letter-spacing: -0.6px;
+  color: var(--mp-ink);
+  line-height: 1.1;
+}
+.mp-modal-sub {
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+  margin-top: 6px;
+}
+.mp-modal-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--mp-muted-ink);
+  font-size: 13px;
+}
+.mp-modal-error {
+  margin: 0 24px 12px;
+  padding: 10px 14px;
+  background: rgba(201, 90, 46, 0.12);
+  border: 0.5px solid var(--mp-accent);
+  color: var(--mp-accent);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.mp-modal-foot {
+  padding: 14px 24px;
+  border-top: 0.5px solid var(--mp-hairline);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mp-trade-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 24px;
+  border-bottom: 0.5px solid var(--mp-hairline);
+}
+.mp-trade-chip {
+  font-family: var(--mp-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 0.5px solid var(--mp-hairline);
+  background: var(--mp-panel-bg);
+  color: var(--mp-ink);
+  cursor: pointer;
+  position: relative;
+  padding-left: 22px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.mp-trade-chip::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mp-chip-color, var(--mp-muted-ink));
+  transform: translateY(-50%);
+}
+.mp-trade-chip:hover { border-color: var(--mp-ink); }
+.mp-trade-chip.is-active {
+  background: var(--mp-ink);
+  color: var(--mp-accent-ink);
+  border-color: var(--mp-ink);
+}
+
+.mp-trade-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--mp-hairline);
+}
+.mp-trade-col {
+  background: var(--mp-tile-bg);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.mp-trade-col-title {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--mp-muted-ink);
+}
+.mp-trade-money {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mp-trade-money-label {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  color: var(--mp-muted-ink);
+  letter-spacing: 0.5px;
+}
+.mp-trade-money input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--mp-panel-bg);
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 4px;
+  font-family: var(--mp-mono);
+  font-size: 14px;
+  color: var(--mp-ink);
+  box-sizing: border-box;
+}
+.mp-trade-money input:focus {
+  outline: none;
+  border-color: var(--mp-ink);
+}
+
+.mp-trade-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.mp-trade-empty {
+  font-family: var(--mp-mono);
+  font-size: 11px;
+  color: var(--mp-muted-ink);
+  opacity: 0.6;
+  padding: 8px 0;
+}
+.mp-trade-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 0.5px solid transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--mp-ink);
+}
+.mp-trade-item:hover:not(.is-blocked) { background: var(--mp-active-row); }
+.mp-trade-item.is-selected { border-color: var(--mp-ink); background: var(--mp-active-row); }
+.mp-trade-item.is-blocked { opacity: 0.4; cursor: not-allowed; }
+.mp-trade-item.is-summary { cursor: default; padding-left: 4px; }
+.mp-trade-item input[type="checkbox"] { margin: 0; }
+.mp-trade-item-strip {
+  width: 4px;
+  height: 18px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+.mp-trade-item-name { flex: 1; }
+
+.mp-trade-summary-money {
+  font-family: var(--mp-mono);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--mp-ink);
+}
+.mp-trade-summary-money .mp-cur { color: var(--mp-muted-ink); margin-right: 2px; font-size: 14px; }
+
+/* Pending banner for the proposer */
+.mp-trade-pending-banner {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--mp-tile-bg);
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(42, 36, 24, 0.18);
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mp-ui);
+  font-size: 13px;
+  color: var(--mp-ink);
+  z-index: 180;
+}
+
+.mp-cta-trade {
+  margin-left: 6px;
+}
+
+@media (max-width: 700px) {
+  .mp-trade-grid { grid-template-columns: 1fr; }
+  .mp-modal { max-height: 96vh; }
+}
+
 /* ============================================================
    ADMIN PANEL (monopoly editor)
    ============================================================ */
