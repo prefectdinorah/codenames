@@ -1357,8 +1357,10 @@ function mpTileCenterPct(i) {
     return { x: MP_CORNER_PCT + (along - 0.5) * MP_CELL_PCT, y: MP_CORNER_PCT / 2 };
   }
   if (edge === 'left') {
+    // Positions 11..19 run UP the left column from jail toward parking,
+    // so y must DECREASE as position increases (jail at bottom, parking at top).
     const along = i - 10;
-    return { x: MP_CORNER_PCT / 2, y: MP_CORNER_PCT + (along - 0.5) * MP_CELL_PCT };
+    return { x: MP_CORNER_PCT / 2, y: 100 - MP_CORNER_PCT - (along - 0.5) * MP_CELL_PCT };
   }
   // right
   const along = i - 30;
@@ -2518,14 +2520,17 @@ function mpUpdateTokens() {
 }
 
 function mpPlaceAllTokens() {
-  // Compute per-tile stacks from currently-displayed positions
+  // Compute per-tile stacks from currently-displayed positions, ignoring tokens
+  // currently animating (they're driven by rAF and shouldn't be disturbed).
   const byTile = {};
   for (const pid of Object.keys(mpTokens)) {
+    if (mpAnimating[pid]) continue;
     const pos = mpDisplayed[pid];
     if (pos === undefined) continue;
     (byTile[pos] = byTile[pos] || []).push(pid);
   }
   for (const pid of Object.keys(mpTokens)) {
+    if (mpAnimating[pid]) continue;
     const tok = mpTokens[pid];
     const pos = mpDisplayed[pid];
     if (pos === undefined) continue;
@@ -2599,7 +2604,6 @@ function mpUpdateDice() {
 }
 
 async function mpStartWalk(pid, target) {
-  // If already walking, just update the target — the running loop will pick it up
   if (mpAnimating[pid]) {
     mpPendingTarget[pid] = target;
     return;
@@ -2611,24 +2615,78 @@ async function mpStartWalk(pid, target) {
     const dist = (to - from + 40) % 40;
     if (dist === 0) break;
     if (dist > 12) {
-      // Big jump (jail teleport, etc.) — slide direct
+      await mpJumpTo(pid, to);
       mpDisplayed[pid] = to;
-      mpPlaceAllTokens();
       from = to;
-      await new Promise((r) => setTimeout(r, MP_JUMP_MS));
     } else {
-      const next = (from + 1) % 40;
-      mpDisplayed[pid] = next;
-      mpPlaceAllTokens();
-      from = next;
-      await new Promise((r) => setTimeout(r, MP_STEP_MS));
+      await mpWalkSegment(pid, from, dist);
+      from = (from + dist) % 40;
+      mpDisplayed[pid] = from;
     }
+    mpPlaceAllTokens(); // settle other tokens around new resting position
     if (mpPendingTarget[pid] !== undefined) {
       to = mpPendingTarget[pid];
       delete mpPendingTarget[pid];
     }
   }
   mpAnimating[pid] = false;
+  mpPlaceAllTokens(); // final stack-offset re-application
+}
+
+// Smooth interpolation along the path through `steps` cells, using rAF.
+// The token glides continuously, picking up board edges naturally because
+// successive cell centers are adjacent.
+function mpWalkSegment(pid, fromPos, steps) {
+  return new Promise((resolve) => {
+    const tok = mpTokens[pid];
+    if (!tok) { resolve(); return; }
+    const waypoints = [mpTileCenterPct(fromPos)];
+    for (let s = 1; s <= steps; s++) waypoints.push(mpTileCenterPct((fromPos + s) % 40));
+
+    tok.style.transition = 'none'; // we drive every frame; CSS transition would lag
+    const totalMs = steps * MP_STEP_MS;
+    const startTs = performance.now();
+    const segCount = waypoints.length - 1;
+
+    const tick = () => {
+      const elapsed = performance.now() - startTs;
+      const tRaw = Math.min(1, elapsed / totalMs);
+      // Slight ease-out so the last steps feel like settling
+      const t = 1 - Math.pow(1 - tRaw, 1.4);
+      const segPos = t * segCount;
+      const segIdx = Math.min(segCount - 1, Math.floor(segPos));
+      const localT = segPos - segIdx;
+      const a = waypoints[segIdx];
+      const b = waypoints[segIdx + 1];
+      tok.style.left = (a.x + (b.x - a.x) * localT) + '%';
+      tok.style.top = (a.y + (b.y - a.y) * localT) + '%';
+      if (tRaw < 1) {
+        requestAnimationFrame(tick);
+      } else {
+        const last = waypoints[waypoints.length - 1];
+        tok.style.left = last.x + '%';
+        tok.style.top = last.y + '%';
+        tok.style.transition = '';
+        resolve();
+      }
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+// Direct slide for big jumps (jail teleport, restart). Uses CSS transition.
+function mpJumpTo(pid, target) {
+  return new Promise((resolve) => {
+    const tok = mpTokens[pid];
+    if (!tok) { resolve(); return; }
+    const dest = mpTileCenterPct(target);
+    tok.style.transition = `left ${MP_JUMP_MS}ms cubic-bezier(.5,.1,.5,1.05), top ${MP_JUMP_MS}ms cubic-bezier(.5,.1,.5,1.05)`;
+    // Force reflow so the transition actually triggers from current to new value.
+    void tok.offsetWidth;
+    tok.style.left = dest.x + '%';
+    tok.style.top = dest.y + '%';
+    setTimeout(() => { tok.style.transition = ''; resolve(); }, MP_JUMP_MS + 30);
+  });
 }
 
 // ============================================================
