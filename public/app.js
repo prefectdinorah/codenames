@@ -1483,6 +1483,7 @@ function mpBuildLeftAside() {
       // Filled slot
       if (isPlaying && pid === state.currentPlayerId) row.classList.add('is-active');
       if (ps && ps.bankrupt) row.classList.add('is-bankrupt');
+      if (p.disconnected) row.classList.add('is-offline');
 
       const dot = document.createElement('div');
       dot.className = 'mp-prow-dot';
@@ -1507,6 +1508,12 @@ function mpBuildLeftAside() {
         const tag = document.createElement('span');
         tag.className = 'mp-prow-tag';
         tag.textContent = '🔒';
+        nameRow.appendChild(tag);
+      }
+      if (p.disconnected) {
+        const tag = document.createElement('span');
+        tag.className = 'mp-prow-tag mp-prow-tag-offline';
+        tag.textContent = 'офлайн';
         nameRow.appendChild(tag);
       }
       main.appendChild(nameRow);

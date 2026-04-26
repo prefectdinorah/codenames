@@ -910,7 +910,9 @@ function getPlayerState(room, playerId) {
   const player = room.players.get(playerId);
   const players = [];
   for (const [id, p] of room.players) {
-    players.push({ id, name: p.name, team: p.team, role: p.role });
+    const entry = { id, name: p.name, team: p.team, role: p.role };
+    if (p.disconnected || (p.ws && p.ws.readyState !== 1)) entry.disconnected = true;
+    players.push(entry);
   }
 
   const base = {
@@ -976,7 +978,7 @@ wss.on('connection', (ws, req) => {
     try { ws.close(1013, 'maintenance'); } catch {}
     return;
   }
-  const playerId = String(nextPlayerId++);
+  let playerId = String(nextPlayerId++);
   let currentRoom = null;
 
   ws.on('message', (raw) => {
@@ -999,7 +1001,24 @@ wss.on('connection', (ws, req) => {
       if (!room) { ws.send(JSON.stringify({ type: 'error', message: 'Комната не найдена' })); return; }
       currentRoom = room;
       const name = resolvePlayerName(msg.name);
-      room.players.set(playerId, { ws, name, team: null, role: null });
+
+      // Reconnect-by-name (monopoly only): take over a disconnected slot with the same name.
+      let reattached = false;
+      if (room.gameMode === 'monopoly') {
+        for (const [pid, p] of room.players) {
+          if (p.name === name && (!p.ws || p.ws.readyState !== 1)) {
+            p.ws = ws;
+            p.disconnected = false;
+            playerId = pid;     // adopt the existing slot's id
+            reattached = true;
+            mpLog(room.game, `${name} вернулся в игру`);
+            break;
+          }
+        }
+      }
+      if (!reattached) {
+        room.players.set(playerId, { ws, name, team: null, role: null });
+      }
       // Transfer host if special user
       if (isSpecialUser(msg.name)) room.hostId = playerId;
       broadcastRoom(room);
@@ -1112,22 +1131,50 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    if (currentRoom) {
-      if (currentRoom.gameMode === 'codenames' && currentRoom.game.playerVotes) {
-        delete currentRoom.game.playerVotes[playerId];
-        checkVoteConsensus(currentRoom);
+    if (!currentRoom) return;
+
+    // Monopoly: keep slot, mark disconnected. Reconnect-by-name reuses it.
+    if (currentRoom.gameMode === 'monopoly') {
+      const player = currentRoom.players.get(playerId);
+      if (!player) return;
+      player.disconnected = true;
+      const playerName = player.name;
+      // Anyone still connected?
+      let anyConnected = false;
+      for (const [, p] of currentRoom.players) {
+        if (p.ws && p.ws.readyState === 1) { anyConnected = true; break; }
       }
-      currentRoom.players.delete(playerId);
-      if (currentRoom.players.size === 0) {
-        clearTimer(currentRoom);
-        cancelConfirmation(currentRoom);
+      if (!anyConnected) {
+        // Nobody's left to see the room — drop it.
         rooms.delete(currentRoom.code);
-      } else {
-        if (currentRoom.hostId === playerId) {
-          currentRoom.hostId = currentRoom.players.keys().next().value;
-        }
-        broadcastRoom(currentRoom);
+        return;
       }
+      // Pass host if needed
+      if (currentRoom.hostId === playerId) {
+        for (const [pid, p] of currentRoom.players) {
+          if (p.ws && p.ws.readyState === 1) { currentRoom.hostId = pid; break; }
+        }
+      }
+      mpLog(currentRoom.game, `${playerName} отключился`);
+      broadcastRoom(currentRoom);
+      return;
+    }
+
+    // Other game modes: existing behaviour — drop the player immediately.
+    if (currentRoom.gameMode === 'codenames' && currentRoom.game.playerVotes) {
+      delete currentRoom.game.playerVotes[playerId];
+      checkVoteConsensus(currentRoom);
+    }
+    currentRoom.players.delete(playerId);
+    if (currentRoom.players.size === 0) {
+      clearTimer(currentRoom);
+      cancelConfirmation(currentRoom);
+      rooms.delete(currentRoom.code);
+    } else {
+      if (currentRoom.hostId === playerId) {
+        currentRoom.hostId = currentRoom.players.keys().next().value;
+      }
+      broadcastRoom(currentRoom);
     }
   });
 });

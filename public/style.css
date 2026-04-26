@@ -2054,6 +2054,9 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 }
 .mp-player-row.is-active { background: var(--mp-active-row); }
 .mp-player-row.is-bankrupt { opacity: 0.4; }
+.mp-player-row.is-offline .mp-prow-name { color: var(--mp-muted-ink); }
+.mp-player-row.is-offline .mp-prow-dot { opacity: 0.4; }
+.mp-prow-tag-offline { color: var(--mp-accent) !important; }
 .mp-prow-dot {
   width: 12px;
   height: 12px;
