@@ -1057,12 +1057,21 @@ wss.on('connection', (ws, req) => {
       const role = msg.role || null;
       if (currentRoom.gameMode === 'spyfall' || currentRoom.gameMode === 'whoami' || currentRoom.gameMode === 'monopoly') {
         if (team && team !== 'player') return;
-        if (currentRoom.gameMode === 'monopoly' && team === 'player' && player.team !== 'player') {
-          if (currentRoom.game.phase !== 'lobby') return; // can't join mid-game
-          const cap = currentRoom.settings.maxPlayers || 4;
-          let occupied = 0;
-          for (const [, p] of currentRoom.players) if (p.team === 'player') occupied++;
-          if (occupied >= cap) return;
+        if (currentRoom.gameMode === 'monopoly') {
+          if (team === 'player') {
+            if (currentRoom.game.phase !== 'lobby') return; // can't join mid-game
+            // Slot must be specified; must be free or already mine
+            const requestedSlot = parseInt(msg.slot, 10);
+            if (!Number.isFinite(requestedSlot) || requestedSlot < 0 || requestedSlot >= currentRoom.game.maxSlots) return;
+            const occupant = mpPlayerOfSlot(currentRoom, requestedSlot);
+            if (occupant && occupant !== playerId) return; // taken
+            // Release any previous slot this player held
+            if (player.slot != null && player.slot !== requestedSlot) player.slot = null;
+            player.slot = requestedSlot;
+          } else {
+            // Spectator — release slot
+            player.slot = null;
+          }
         }
       } else {
         if (team && !currentRoom.game.teams.includes(team)) return;
@@ -1776,25 +1785,35 @@ const { TRANSPORT_RENT, JAIL_INDEX, GO_TO_JAIL_INDEX, GO_SALARY } = monopolyData
 function createMonopolyGame(settings) {
   const deckId = settings.deckId || 'classic';
   const deck = monopolyStore.getDeck(deckId);
+  const maxSlots = Math.max(2, Math.min(8, settings.maxPlayers || 4));
+  // slotState[i]: per-slot game state. Persists across reconnects since the
+  // slot is the game-internal identity, not the player.
+  const slotState = {};
+  for (let i = 0; i < maxSlots; i++) {
+    slotState[i] = {
+      money: 0, position: 0, inJail: false, jailTurns: 0, bankrupt: false,
+    };
+  }
   return {
     phase: 'lobby',          // lobby | playing | finished
     turn: null,              // rolling | jail-decision | action | ended
-    turnOrder: [],
+    maxSlots,
+    turnOrder: [],           // array of slot indices (shuffled)
     turnIndex: 0,
-    currentPlayerId: null,
+    currentSlot: null,       // slot index of player whose turn it is
     dice: null,
     doublesCount: 0,
     startingMoney: settings.startingMoney || 1500,
     deckId,
     deck,
-    playerState: {},
-    ownership: {},
-    houses: {},   // slug → 0..5 (5 = hotel)
+    slotState,               // slot index → state
+    ownership: {},           // slug → slot index
+    houses: {},              // slug → 0..5 (5 = hotel)
     log: [],
     pendingBuy: null,
-    // Active trade: { id, fromId, toId, fromOffer:{money,slugs[]}, toOffer:{money,slugs[]}, status: 'pending' }
+    // Active trade keyed on slot indices (stable across reconnects)
     activeTrade: null,
-    winner: null,
+    winner: null,            // slot index of winner
     paused: false,
     timerEnd: null,
     timerRemaining: null,
@@ -1810,6 +1829,25 @@ function mpLog(game, text) {
 
 function mpPlayerName(room, id) {
   return room.players.get(id)?.name || 'Игрок';
+}
+
+// Slot helpers — slot is the persistent game-internal identity.
+function mpSlotOfPlayer(room, playerId) {
+  const p = room.players.get(playerId);
+  if (!p || p.slot == null) return null;
+  return p.slot;
+}
+function mpPlayerOfSlot(room, slot) {
+  if (slot == null) return null;
+  for (const [pid, p] of room.players) {
+    if (p.slot === slot) return pid;
+  }
+  return null;
+}
+function mpSlotName(room, slot) {
+  const pid = mpPlayerOfSlot(room, slot);
+  if (pid) return mpPlayerName(room, pid);
+  return `Слот ${slot + 1}`;
 }
 
 function mpSquareLabel(square, deck) {
@@ -1833,18 +1871,23 @@ function mpImageUrl(slug) {
 }
 
 function startMonopolyGame(room) {
-  const players = [];
-  for (const [id, p] of room.players) if (p.team === 'player') players.push(id);
-  if (players.length < 2 || players.length > 8) return false;
   const game = room.game;
-  game.turnOrder = shuffle(players);
+  // Collect slots that have an occupant
+  const filledSlots = [];
+  for (let i = 0; i < game.maxSlots; i++) {
+    if (mpPlayerOfSlot(room, i)) filledSlots.push(i);
+  }
+  if (filledSlots.length < 2) return false;
+
+  game.turnOrder = shuffle(filledSlots);
   game.turnIndex = 0;
-  game.currentPlayerId = game.turnOrder[0];
-  game.playerState = {};
-  for (const id of game.turnOrder) {
-    game.playerState[id] = {
-      money: game.startingMoney, position: 0,
-      inJail: false, jailTurns: 0, bankrupt: false,
+  game.currentSlot = game.turnOrder[0];
+  // Reset slot state for occupied slots, leave empty slots zeroed
+  for (let i = 0; i < game.maxSlots; i++) {
+    const filled = filledSlots.includes(i);
+    game.slotState[i] = {
+      money: filled ? game.startingMoney : 0,
+      position: 0, inJail: false, jailTurns: 0, bankrupt: false,
     };
   }
   game.ownership = {};
@@ -1857,15 +1900,17 @@ function startMonopolyGame(room) {
   game.turn = 'rolling';
   game.pendingBuy = null;
   game.winner = null;
-  mpLog(game, `Игра началась: ${game.turnOrder.length} игроков, каждому по ${game.startingMoney}`);
+  mpLog(game, `Игра началась: ${filledSlots.length} игроков, каждому по ${game.startingMoney}`);
   return true;
 }
 
-function mpRollDice(room, playerId) {
+// All monopoly mechanics below operate on SLOT INDICES, not player ids.
+// Slot is the persistent game-internal identity; players come and go.
+function mpRollDice(room, slot) {
   const game = room.game;
   if (game.phase !== 'playing') return;
-  if (playerId !== game.currentPlayerId) return;
-  const ps = game.playerState[playerId];
+  if (slot !== game.currentSlot) return;
+  const ps = game.slotState[slot];
   if (!ps || ps.bankrupt) return;
   if (game.turn !== 'rolling' && game.turn !== 'jail-decision') return;
 
@@ -1873,29 +1918,27 @@ function mpRollDice(room, playerId) {
   const d2 = 1 + Math.floor(Math.random() * 6);
   const isDouble = d1 === d2;
   game.dice = [d1, d2];
-  const playerName = mpPlayerName(room, playerId);
+  const slotName = mpSlotName(room, slot);
 
   if (ps.inJail) {
     if (isDouble) {
       ps.inJail = false;
       ps.jailTurns = 0;
-      mpLog(game, `${playerName} выбросил дубль ${d1}-${d2} — выход из тюрьмы`);
-      mpAdvance(room, playerId, d1 + d2);
-      // Jail-escape doesn't give bonus turn — doublesCount not incremented
+      mpLog(game, `${slotName} выбросил дубль ${d1}-${d2} — выход из тюрьмы`);
+      mpAdvance(room, slot, d1 + d2);
     } else {
       ps.jailTurns += 1;
-      mpLog(game, `${playerName} выбросил ${d1}-${d2} — остаётся в тюрьме`);
+      mpLog(game, `${slotName} выбросил ${d1}-${d2} — остаётся в тюрьме`);
       if (ps.jailTurns >= 3) {
         if (ps.money >= 50) {
           ps.money -= 50;
           ps.inJail = false;
           ps.jailTurns = 0;
-          mpLog(game, `${playerName} платит 50 за выход и двигается на ${d1 + d2}`);
-          mpAdvance(room, playerId, d1 + d2);
+          mpLog(game, `${slotName} платит 50 за выход и двигается на ${d1 + d2}`);
+          mpAdvance(room, slot, d1 + d2);
         } else {
-          mpLog(game, `${playerName} не может заплатить 50 — банкрот`);
-          mpBankrupt(room, playerId, null);
-          // mpBankrupt auto-advances; don't touch turn here
+          mpLog(game, `${slotName} не может заплатить 50 — банкрот`);
+          mpBankrupt(room, slot, null);
         }
       } else {
         game.turn = 'action';
@@ -1907,158 +1950,151 @@ function mpRollDice(room, playerId) {
   if (isDouble) {
     game.doublesCount += 1;
     if (game.doublesCount >= 3) {
-      mpLog(game, `${playerName} — 3-й дубль подряд, в тюрьму!`);
-      mpSendToJail(room, playerId);
+      mpLog(game, `${slotName} — 3-й дубль подряд, в тюрьму!`);
+      mpSendToJail(room, slot);
       game.turn = 'action';
       return;
     }
   }
 
-  mpLog(game, `${playerName} бросает ${d1}+${d2}`);
-  mpAdvance(room, playerId, d1 + d2);
+  mpLog(game, `${slotName} бросает ${d1}+${d2}`);
+  mpAdvance(room, slot, d1 + d2);
 }
 
-function mpAdvance(room, playerId, steps) {
+function mpAdvance(room, slot, steps) {
   const game = room.game;
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   const newPos = (ps.position + steps) % 40;
   if (newPos < ps.position || steps >= 40) {
     ps.money += GO_SALARY;
-    mpLog(game, `${mpPlayerName(room, playerId)} проходит GO, +${GO_SALARY}`);
+    mpLog(game, `${mpSlotName(room, slot)} проходит GO, +${GO_SALARY}`);
   }
   ps.position = newPos;
-  mpResolveSquare(room, playerId);
+  mpResolveSquare(room, slot);
 }
 
-function mpResolveSquare(room, playerId) {
+function mpResolveSquare(room, slot) {
   const game = room.game;
   const deck = game.deck;
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   const square = deck.board[ps.position];
-  const playerName = mpPlayerName(room, playerId);
+  const slotName = mpSlotName(room, slot);
 
   if (square.type === 'property' || square.type === 'transport' || square.type === 'utility') {
     const slug = square.slug;
     const info = square.type === 'property' ? deck.properties[slug]
       : square.type === 'transport' ? deck.transport[slug]
       : deck.utilities[slug];
-    const ownerId = game.ownership[slug];
-    if (!ownerId) {
+    const ownerSlot = game.ownership[slug];
+    if (ownerSlot == null) {
       game.pendingBuy = { slug, type: square.type, price: info.price, name: info.name };
-      mpLog(game, `${playerName} на «${info.name}» — свободно, цена ${info.price}`);
-    } else if (ownerId === playerId) {
-      mpLog(game, `${playerName} на своей «${info.name}»`);
+      mpLog(game, `${slotName} на «${info.name}» — свободно, цена ${info.price}`);
+    } else if (ownerSlot === slot) {
+      mpLog(game, `${slotName} на своей «${info.name}»`);
     } else {
-      const rent = mpComputeRent(game, square, slug, ownerId);
-      mpCharge(room, playerId, ownerId, rent, info.name);
+      const rent = mpComputeRent(game, square, slug, ownerSlot);
+      mpCharge(room, slot, ownerSlot, rent, info.name);
     }
   } else if (square.type === 'tax') {
-    mpCharge(room, playerId, null, square.amount, square.name);
+    mpCharge(room, slot, null, square.amount, square.name);
   } else if (square.type === 'go_to_jail') {
-    mpLog(game, `${playerName} отправляется в тюрьму`);
-    mpSendToJail(room, playerId);
+    mpLog(game, `${slotName} отправляется в тюрьму`);
+    mpSendToJail(room, slot);
   } else if (square.type === 'chance' || square.type === 'chest') {
-    mpLog(game, `${playerName} на клетке «${square.type === 'chance' ? 'Шанс' : 'Казна'}» (без эффекта)`);
+    mpLog(game, `${slotName} на клетке «${square.type === 'chance' ? 'Шанс' : 'Казна'}» (без эффекта)`);
   }
 
-  // Only set action if bankruptcy/jail didn't already advance the turn
-  if (game.phase === 'playing' && playerId === game.currentPlayerId && !ps.bankrupt) {
+  if (game.phase === 'playing' && slot === game.currentSlot && !ps.bankrupt) {
     game.turn = 'action';
   }
 }
 
-function mpComputeRent(game, square, slug, ownerId) {
+function mpComputeRent(game, square, slug, ownerSlot) {
   const deck = game.deck;
   if (square.type === 'property') {
     const prop = deck.properties[slug];
     const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
-    const ownsAll = groupSlugs.every((s) => game.ownership[s] === ownerId);
+    const ownsAll = groupSlugs.every((s) => game.ownership[s] === ownerSlot);
     const houses = game.houses[slug] || 0;
     if (houses > 0) return prop.rent[houses] || prop.rent[prop.rent.length - 1];
     return ownsAll ? prop.rent[0] * 2 : prop.rent[0];
   }
   if (square.type === 'transport') {
-    const owned = Object.keys(deck.transport).filter((s) => game.ownership[s] === ownerId).length;
+    const owned = Object.keys(deck.transport).filter((s) => game.ownership[s] === ownerSlot).length;
     return TRANSPORT_RENT[Math.max(0, owned - 1)] || 0;
   }
   if (square.type === 'utility') {
-    const owned = Object.keys(deck.utilities).filter((s) => game.ownership[s] === ownerId).length;
+    const owned = Object.keys(deck.utilities).filter((s) => game.ownership[s] === ownerSlot).length;
     const diceSum = (game.dice?.[0] || 0) + (game.dice?.[1] || 0);
     return (owned === 2 ? 10 : 4) * diceSum;
   }
   return 0;
 }
 
-// Build a house (or hotel at level 5) on a property.
-// Rules: must own all of the group, even-build (cannot exceed min in group by more than 1),
-// max 5 (hotel), enough money, no pendingBuy mid-action.
-function mpBuildHouse(room, playerId, slug) {
+function mpBuildHouse(room, slot, slug) {
   const game = room.game;
   if (game.phase !== 'playing') return;
-  if (playerId !== game.currentPlayerId) return;
+  if (slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
   if (game.turn === 'jail-decision') return;
   const deck = game.deck;
   const prop = deck.properties[slug];
   if (!prop) return;
-  if (game.ownership[slug] !== playerId) return;
+  if (game.ownership[slug] !== slot) return;
   const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
-  if (!groupSlugs.every((s) => game.ownership[s] === playerId)) return;
+  if (!groupSlugs.every((s) => game.ownership[s] === slot)) return;
   const cur = game.houses[slug] || 0;
   if (cur >= 5) return;
-  // Even-build: this slug's level must be the min (or tied for min) in the group
   const minInGroup = Math.min(...groupSlugs.map((s) => game.houses[s] || 0));
   if (cur > minInGroup) return;
   const cost = prop.house || 0;
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   if (ps.money < cost) return;
   ps.money -= cost;
   game.houses[slug] = cur + 1;
   const next = game.houses[slug];
   const what = next === 5 ? 'отель' : `${next} ${next === 1 ? 'дом' : 'дома'}`;
-  mpLog(game, `${mpPlayerName(room, playerId)} строит на «${prop.name}» (теперь ${what}), −${cost}`);
+  mpLog(game, `${mpSlotName(room, slot)} строит на «${prop.name}» (теперь ${what}), −${cost}`);
 }
 
-// Sell one house. Even-sell: this slug's level must be the max in the group.
-// Refund half the house price (rounded down).
-function mpSellHouse(room, playerId, slug) {
+function mpSellHouse(room, slot, slug) {
   const game = room.game;
   if (game.phase !== 'playing') return;
-  if (playerId !== game.currentPlayerId) return;
+  if (slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
   if (game.turn === 'jail-decision') return;
   const deck = game.deck;
   const prop = deck.properties[slug];
   if (!prop) return;
-  if (game.ownership[slug] !== playerId) return;
+  if (game.ownership[slug] !== slot) return;
   const cur = game.houses[slug] || 0;
   if (cur <= 0) return;
   const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
   const maxInGroup = Math.max(...groupSlugs.map((s) => game.houses[s] || 0));
   if (cur < maxInGroup) return;
   const refund = Math.floor((prop.house || 0) / 2);
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   ps.money += refund;
   game.houses[slug] = cur - 1;
   const left = game.houses[slug];
   const what = left === 0 ? 'без построек' : left === 5 ? 'отель' : `${left} ${left === 1 ? 'дом' : 'дома'}`;
-  mpLog(game, `${mpPlayerName(room, playerId)} продаёт постройку на «${prop.name}» (теперь ${what}), +${refund}`);
+  mpLog(game, `${mpSlotName(room, slot)} продаёт постройку на «${prop.name}» (теперь ${what}), +${refund}`);
 }
 
-function mpCharge(room, fromId, toId, amount, label) {
+function mpCharge(room, fromSlot, toSlot, amount, label) {
   const game = room.game;
-  const ps = game.playerState[fromId];
-  const fromName = mpPlayerName(room, fromId);
-  const toName = toId ? mpPlayerName(room, toId) : 'банку';
+  const ps = game.slotState[fromSlot];
+  const fromName = mpSlotName(room, fromSlot);
+  const toName = toSlot != null ? mpSlotName(room, toSlot) : 'банку';
   if (ps.money < amount) {
     const paid = ps.money;
-    if (toId) game.playerState[toId].money += paid;
+    if (toSlot != null) game.slotState[toSlot].money += paid;
     mpLog(game, `${fromName} не может заплатить ${amount} (${label}) — банкрот, ${toName} получает ${paid}`);
-    mpBankrupt(room, fromId, toId);
+    mpBankrupt(room, fromSlot, toSlot);
     return;
   }
   ps.money -= amount;
-  if (toId) game.playerState[toId].money += amount;
+  if (toSlot != null) game.slotState[toSlot].money += amount;
   mpLog(game, `${fromName} платит ${amount} → ${toName} за «${label}»`);
 }
 
@@ -2094,32 +2130,34 @@ function mpTradeBlocked(game, slug) {
   return groupSlugs.some((s) => (game.houses[s] || 0) > 0);
 }
 
-function mpValidateOffer(room, ownerId, offer) {
+function mpValidateOffer(room, ownerSlot, offer) {
   const game = room.game;
   if (!offer || typeof offer !== 'object') return 'плохое предложение';
   const money = parseInt(offer.money, 10) || 0;
   if (money < 0) return 'отрицательные деньги';
-  const ps = game.playerState[ownerId];
+  const ps = game.slotState[ownerSlot];
   if (!ps || ps.bankrupt) return 'игрок не в игре';
-  if (ps.money < money) return `у ${mpPlayerName(room, ownerId)} недостаточно денег`;
+  if (ps.money < money) return `у ${mpSlotName(room, ownerSlot)} недостаточно денег`;
   const slugs = Array.isArray(offer.slugs) ? offer.slugs : [];
   for (const slug of slugs) {
-    if (game.ownership[slug] !== ownerId) return `${slug} не принадлежит игроку`;
+    if (game.ownership[slug] !== ownerSlot) return `${slug} не принадлежит игроку`;
     if (mpTradeBlocked(game, slug)) return `на «${game.deck.properties[slug]?.name || slug}» (или в её группе) есть постройки`;
   }
   return null;
 }
 
-function mpProposeTrade(room, fromId, msg) {
+function mpProposeTrade(room, fromSlot, msg) {
   const game = room.game;
   if (game.phase !== 'playing') return;
-  if (game.activeTrade) return; // one at a time
-  const fromPs = game.playerState[fromId];
+  if (game.activeTrade) return;
+  const fromPs = game.slotState[fromSlot];
   if (!fromPs || fromPs.bankrupt) return;
-  const toId = String(msg.toId || '');
-  if (!toId || toId === fromId) return;
-  const toPs = game.playerState[toId];
+  const toSlot = parseInt(msg.toSlot, 10);
+  if (!Number.isFinite(toSlot) || toSlot === fromSlot) return;
+  const toPs = game.slotState[toSlot];
   if (!toPs || toPs.bankrupt) return;
+  // Recipient slot must have an active occupant (or at least an occupant)
+  if (!mpPlayerOfSlot(room, toSlot)) return;
 
   const fromOffer = {
     money: Math.max(0, parseInt(msg.fromMoney, 10) || 0),
@@ -2129,15 +2167,14 @@ function mpProposeTrade(room, fromId, msg) {
     money: Math.max(0, parseInt(msg.toMoney, 10) || 0),
     slugs: Array.isArray(msg.toSlugs) ? msg.toSlugs.map(String) : [],
   };
-
   if (fromOffer.money === 0 && fromOffer.slugs.length === 0
-      && toOffer.money === 0 && toOffer.slugs.length === 0) return; // empty trade
+      && toOffer.money === 0 && toOffer.slugs.length === 0) return;
 
-  const errFrom = mpValidateOffer(room, fromId, fromOffer);
-  const errTo = mpValidateOffer(room, toId, toOffer);
+  const errFrom = mpValidateOffer(room, fromSlot, fromOffer);
+  const errTo = mpValidateOffer(room, toSlot, toOffer);
   if (errFrom || errTo) {
-    // Send only to the proposer so they know why
-    const player = room.players.get(fromId);
+    const fromPid = mpPlayerOfSlot(room, fromSlot);
+    const player = fromPid ? room.players.get(fromPid) : null;
     if (player && player.ws && player.ws.readyState === 1) {
       player.ws.send(JSON.stringify({ type: 'trade-error', message: errFrom || errTo }));
     }
@@ -2146,80 +2183,72 @@ function mpProposeTrade(room, fromId, msg) {
 
   game.activeTrade = {
     id: String(nextTradeId++),
-    fromId, toId,
+    fromSlot, toSlot,
     fromOffer, toOffer,
     status: 'pending',
   };
-  const fromName = mpPlayerName(room, fromId);
-  const toName = mpPlayerName(room, toId);
-  mpLog(game, `${fromName} предлагает ${toName} сделку`);
+  mpLog(game, `${mpSlotName(room, fromSlot)} предлагает ${mpSlotName(room, toSlot)} сделку`);
 }
 
-function mpCancelTrade(room, playerId) {
+function mpCancelTrade(room, slot) {
   const game = room.game;
   if (!game.activeTrade) return;
-  if (game.activeTrade.fromId !== playerId) return; // only proposer can cancel
-  mpLog(game, `${mpPlayerName(room, playerId)} отозвал предложение`);
+  if (game.activeTrade.fromSlot !== slot) return;
+  mpLog(game, `${mpSlotName(room, slot)} отозвал предложение`);
   game.activeTrade = null;
 }
 
-function mpRespondTrade(room, playerId, accept) {
+function mpRespondTrade(room, slot, accept) {
   const game = room.game;
   const trade = game.activeTrade;
   if (!trade) return;
-  if (trade.toId !== playerId) return;
+  if (trade.toSlot !== slot) return;
 
   if (!accept) {
-    mpLog(game, `${mpPlayerName(room, playerId)} отклонил сделку`);
+    mpLog(game, `${mpSlotName(room, slot)} отклонил сделку`);
     game.activeTrade = null;
     return;
   }
 
-  // Re-validate just before applying — state may have shifted.
-  const errFrom = mpValidateOffer(room, trade.fromId, trade.fromOffer);
-  const errTo = mpValidateOffer(room, trade.toId, trade.toOffer);
+  const errFrom = mpValidateOffer(room, trade.fromSlot, trade.fromOffer);
+  const errTo = mpValidateOffer(room, trade.toSlot, trade.toOffer);
   if (errFrom || errTo) {
     mpLog(game, `Сделка отменена: ${errFrom || errTo}`);
     game.activeTrade = null;
     return;
   }
 
-  // Execute
-  const fromPs = game.playerState[trade.fromId];
-  const toPs = game.playerState[trade.toId];
+  const fromPs = game.slotState[trade.fromSlot];
+  const toPs = game.slotState[trade.toSlot];
   fromPs.money -= trade.fromOffer.money;
   toPs.money += trade.fromOffer.money;
   toPs.money -= trade.toOffer.money;
   fromPs.money += trade.toOffer.money;
-  for (const s of trade.fromOffer.slugs) game.ownership[s] = trade.toId;
-  for (const s of trade.toOffer.slugs) game.ownership[s] = trade.fromId;
+  for (const s of trade.fromOffer.slugs) game.ownership[s] = trade.toSlot;
+  for (const s of trade.toOffer.slugs) game.ownership[s] = trade.fromSlot;
 
-  const fromName = mpPlayerName(room, trade.fromId);
-  const toName = mpPlayerName(room, trade.toId);
-  mpLog(game, `Сделка между ${fromName} и ${toName} прошла`);
+  mpLog(game, `Сделка между ${mpSlotName(room, trade.fromSlot)} и ${mpSlotName(room, trade.toSlot)} прошла`);
   game.activeTrade = null;
 }
 
-function mpBankrupt(room, playerId, creditorId) {
+function mpBankrupt(room, slot, creditorSlot) {
   const game = room.game;
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   ps.bankrupt = true;
   ps.money = 0;
   for (const slug of Object.keys(game.ownership)) {
-    if (game.ownership[slug] === playerId) {
-      // Houses revert to bank regardless of who claims the property
+    if (game.ownership[slug] === slot) {
       if (game.houses[slug]) delete game.houses[slug];
-      if (creditorId) game.ownership[slug] = creditorId;
+      if (creditorSlot != null) game.ownership[slug] = creditorSlot;
       else delete game.ownership[slug];
     }
   }
-  // Drop any pending trade this player was part of
-  if (game.activeTrade && (game.activeTrade.fromId === playerId || game.activeTrade.toId === playerId)) {
+  if (game.activeTrade && (game.activeTrade.fromSlot === slot || game.activeTrade.toSlot === slot)) {
     game.activeTrade = null;
   }
-  mpLog(game, `💀 ${mpPlayerName(room, playerId)} — БАНКРОТ`);
+  mpLog(game, `💀 ${mpSlotName(room, slot)} — БАНКРОТ`);
   mpCheckWin(room);
-  if (game.phase === 'playing' && playerId === game.currentPlayerId) {
+  if (game.phase === 'playing' && slot === game.currentSlot) {
     mpAdvanceToNextPlayer(room);
   }
 }
@@ -2229,80 +2258,77 @@ function mpAdvanceToNextPlayer(room) {
   game.doublesCount = 0;
   game.dice = null;
   game.pendingBuy = null;
-  const alive = game.turnOrder.filter((id) => !game.playerState[id].bankrupt);
+  const alive = game.turnOrder.filter((s) => !game.slotState[s].bankrupt);
   if (alive.length <= 1) { mpCheckWin(room); return; }
   do {
     game.turnIndex = (game.turnIndex + 1) % game.turnOrder.length;
-  } while (game.playerState[game.turnOrder[game.turnIndex]].bankrupt);
-  game.currentPlayerId = game.turnOrder[game.turnIndex];
-  const nextPs = game.playerState[game.currentPlayerId];
+  } while (game.slotState[game.turnOrder[game.turnIndex]].bankrupt);
+  game.currentSlot = game.turnOrder[game.turnIndex];
+  const nextPs = game.slotState[game.currentSlot];
   game.turn = nextPs.inJail ? 'jail-decision' : 'rolling';
 }
 
-function mpSendToJail(room, playerId) {
-  const ps = room.game.playerState[playerId];
+function mpSendToJail(room, slot) {
+  const ps = room.game.slotState[slot];
   ps.position = JAIL_INDEX;
   ps.inJail = true;
   ps.jailTurns = 0;
   room.game.doublesCount = 0;
 }
 
-function mpBuy(room, playerId) {
+function mpBuy(room, slot) {
   const game = room.game;
-  if (game.phase !== 'playing' || playerId !== game.currentPlayerId) return;
+  if (game.phase !== 'playing' || slot !== game.currentSlot) return;
   if (!game.pendingBuy) return;
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   const { slug, price, name } = game.pendingBuy;
   if (ps.money < price) return;
   ps.money -= price;
-  game.ownership[slug] = playerId;
-  mpLog(game, `${mpPlayerName(room, playerId)} покупает «${name}» за ${price}`);
+  game.ownership[slug] = slot;
+  mpLog(game, `${mpSlotName(room, slot)} покупает «${name}» за ${price}`);
   game.pendingBuy = null;
 }
 
-function mpSkipBuy(room, playerId) {
+function mpSkipBuy(room, slot) {
   const game = room.game;
-  if (playerId !== game.currentPlayerId || !game.pendingBuy) return;
-  mpLog(game, `${mpPlayerName(room, playerId)} отказывается от «${game.pendingBuy.name}»`);
+  if (slot !== game.currentSlot || !game.pendingBuy) return;
+  mpLog(game, `${mpSlotName(room, slot)} отказывается от «${game.pendingBuy.name}»`);
   game.pendingBuy = null;
 }
 
-function mpEndTurn(room, playerId) {
+function mpEndTurn(room, slot) {
   const game = room.game;
-  if (game.phase !== 'playing' || playerId !== game.currentPlayerId) return;
+  if (game.phase !== 'playing' || slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
-
-  const ps = game.playerState[playerId];
+  const ps = game.slotState[slot];
   const rolledDouble = game.dice && game.dice[0] === game.dice[1] && game.doublesCount > 0 && game.doublesCount < 3;
-
   if (rolledDouble && !ps.inJail && !ps.bankrupt) {
     game.dice = null;
     game.turn = 'rolling';
     return;
   }
-
   mpAdvanceToNextPlayer(room);
 }
 
-function mpPayJail(room, playerId) {
+function mpPayJail(room, slot) {
   const game = room.game;
-  if (playerId !== game.currentPlayerId || game.turn !== 'jail-decision') return;
-  const ps = game.playerState[playerId];
+  if (slot !== game.currentSlot || game.turn !== 'jail-decision') return;
+  const ps = game.slotState[slot];
   if (!ps.inJail || ps.money < 50) return;
   ps.money -= 50;
   ps.inJail = false;
   ps.jailTurns = 0;
   game.turn = 'rolling';
-  mpLog(game, `${mpPlayerName(room, playerId)} платит 50 — вышел из тюрьмы`);
+  mpLog(game, `${mpSlotName(room, slot)} платит 50 — вышел из тюрьмы`);
 }
 
 function mpCheckWin(room) {
   const game = room.game;
-  const alive = game.turnOrder.filter((id) => !game.playerState[id].bankrupt);
+  const alive = game.turnOrder.filter((s) => !game.slotState[s].bankrupt);
   if (alive.length === 1) {
     game.winner = alive[0];
     game.phase = 'finished';
-    mpLog(game, `🏆 ${mpPlayerName(room, alive[0])} — победитель!`);
+    mpLog(game, `🏆 ${mpSlotName(room, alive[0])} — победитель!`);
   }
 }
 
@@ -2348,18 +2374,40 @@ function mpSerializeBoard(game) {
 
 function getMonopolyState(room, playerId) {
   const game = room.game;
+  // Build slot occupant map: slot index → { playerId, name, online }
+  const slotsView = [];
+  for (let i = 0; i < game.maxSlots; i++) {
+    const occupantId = mpPlayerOfSlot(room, i);
+    const occ = occupantId ? room.players.get(occupantId) : null;
+    slotsView.push({
+      slot: i,
+      occupantId: occupantId || null,
+      occupantName: occ ? occ.name : null,
+      online: !!(occ && occ.ws && occ.ws.readyState === 1 && !occ.disconnected),
+    });
+  }
+  const mySlot = mpSlotOfPlayer(room, playerId);
+  const isCurrent = mySlot != null && mySlot === game.currentSlot;
+  const trade = game.activeTrade;
+  const tradeView = trade
+    ? (trade.fromSlot === mySlot || trade.toSlot === mySlot
+        ? trade
+        : { id: trade.id, fromSlot: trade.fromSlot, toSlot: trade.toSlot, status: 'pending' })
+    : null;
   return {
     mpPhase: game.phase,
     mpTurn: game.turn,
-    currentPlayerId: game.currentPlayerId,
+    maxSlots: game.maxSlots,
+    slots: slotsView,
+    mySlot,
+    currentSlot: game.currentSlot,
     dice: game.dice,
     doublesCount: game.doublesCount,
-    playerState: game.playerState,
+    slotState: game.slotState,
     ownership: game.ownership,
     houses: game.houses,
-    pendingBuy: playerId === game.currentPlayerId ? game.pendingBuy : null,
-    activeTrade: game.activeTrade && (game.activeTrade.fromId === playerId || game.activeTrade.toId === playerId)
-      ? game.activeTrade : (game.activeTrade ? { id: game.activeTrade.id, fromId: game.activeTrade.fromId, toId: game.activeTrade.toId, status: 'pending' } : null),
+    pendingBuy: isCurrent ? game.pendingBuy : null,
+    activeTrade: tradeView,
     log: game.log.slice(-20),
     turnOrder: game.turnOrder,
     winner: game.winner,
@@ -2381,18 +2429,16 @@ function handleMonopolyMsg(room, playerId, msg) {
     let maxPlayers = parseInt(msg.maxPlayers, 10);
     if (!Number.isFinite(maxPlayers) || maxPlayers < 2 || maxPlayers > 8) maxPlayers = 4;
     room.settings = { startingMoney, deckId, maxPlayers };
-    // If lobby, recreate game to refresh deck; if mid-game, ignore (would reset)
+    // If lobby, recreate game to refresh deck and slot count
     if (room.game.phase === 'lobby') {
       room.game = createMonopolyGame(room.settings);
-    }
-    // Boot any extra players over the new cap
-    if (room.game.phase === 'lobby') {
-      const playerIds = [];
-      for (const [id, p] of room.players) if (p.team === 'player') playerIds.push(id);
-      while (playerIds.length > maxPlayers) {
-        const id = playerIds.pop();
-        const p = room.players.get(id);
-        if (p) { p.team = null; p.role = null; }
+      // Players in slots that no longer exist become spectators
+      for (const [, p] of room.players) {
+        if (p.slot != null && p.slot >= maxPlayers) {
+          p.slot = null;
+          p.team = null;
+          p.role = null;
+        }
       }
     }
     broadcastRoom(room);
@@ -2407,62 +2453,65 @@ function handleMonopolyMsg(room, playerId, msg) {
     return;
   }
 
+  // Resolve this player's slot for the rest of the gameplay messages
+  const slot = mpSlotOfPlayer(room, playerId);
+
   if (msg.type === 'roll-dice') {
-    mpRollDice(room, playerId);
+    if (slot != null) mpRollDice(room, slot);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'buy-property') {
-    mpBuy(room, playerId);
+    if (slot != null) mpBuy(room, slot);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'skip-buy') {
-    mpSkipBuy(room, playerId);
+    if (slot != null) mpSkipBuy(room, slot);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'end-turn') {
-    mpEndTurn(room, playerId);
+    if (slot != null) mpEndTurn(room, slot);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'pay-jail') {
-    mpPayJail(room, playerId);
+    if (slot != null) mpPayJail(room, slot);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'build-house') {
-    mpBuildHouse(room, playerId, String(msg.slug || ''));
+    if (slot != null) mpBuildHouse(room, slot, String(msg.slug || ''));
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'sell-house') {
-    mpSellHouse(room, playerId, String(msg.slug || ''));
+    if (slot != null) mpSellHouse(room, slot, String(msg.slug || ''));
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'trade-propose') {
-    mpProposeTrade(room, playerId, msg);
+    if (slot != null) mpProposeTrade(room, slot, msg);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'trade-cancel') {
-    mpCancelTrade(room, playerId);
+    if (slot != null) mpCancelTrade(room, slot);
     broadcastRoom(room);
     return;
   }
 
   if (msg.type === 'trade-respond') {
-    mpRespondTrade(room, playerId, !!msg.accept);
+    if (slot != null) mpRespondTrade(room, slot, !!msg.accept);
     broadcastRoom(room);
     return;
   }

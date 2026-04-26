@@ -1311,10 +1311,20 @@ const MP_CORNER_PCT = 13;
 const MP_CELL_PCT = (100 - MP_CORNER_PCT * 2) / 9;
 const MP_CURRENCY = '₽';
 
-function mpTokenColor(playerId) {
-  if (!state.turnOrder) return '#888';
-  const idx = state.turnOrder.indexOf(playerId);
-  return idx >= 0 ? MP_TOKEN_COLORS[idx % MP_TOKEN_COLORS.length] : '#888';
+// Slot-based helpers — slot indices are stable, players come and go.
+function mpSlotColor(slot) {
+  if (slot == null || slot < 0) return '#888';
+  return MP_TOKEN_COLORS[slot % MP_TOKEN_COLORS.length];
+}
+function mpSlotInfo(slot) {
+  if (slot == null || !state.slots) return null;
+  return state.slots.find((s) => s.slot === slot) || null;
+}
+function mpSlotDisplayName(slot) {
+  if (slot == null) return '—';
+  const info = mpSlotInfo(slot);
+  if (info && info.occupantName) return info.occupantName;
+  return `Слот ${slot + 1}`;
 }
 
 function mpTileEdge(i) {
@@ -1426,24 +1436,25 @@ function mpFindTileByIndex(idx) {
   return state.board.find((s) => s.index === idx);
 }
 
-function mpCountHoldings(playerId) {
+function mpCountHoldings(slot) {
   let n = 0;
-  for (const o of Object.values(state.ownership)) if (o === playerId) n++;
+  if (!state.ownership) return 0;
+  for (const o of Object.values(state.ownership)) if (o === slot) n++;
   return n;
 }
 
 function renderMonopolyTurnInfo() {
   const turnEl = $('#turn-indicator');
   if (state.mpPhase !== 'playing') { turnEl.textContent = ''; return; }
-  const current = state.players.find((p) => p.id === state.currentPlayerId);
-  if (!current) { turnEl.textContent = ''; return; }
-  const isYou = state.you && state.you.id === state.currentPlayerId;
+  const cur = state.currentSlot;
+  if (cur == null) { turnEl.textContent = ''; return; }
+  const isYou = state.mySlot === cur;
   let suffix = '';
   if (state.mpTurn === 'jail-decision') suffix = ' (в тюрьме)';
   else if (state.mpTurn === 'rolling') suffix = ' — бросок';
   else if (state.mpTurn === 'action') suffix = ' — действие';
-  turnEl.textContent = (isYou ? 'Твой ход' : `Ход: ${current.name}`) + suffix;
-  turnEl.style.color = mpTokenColor(current.id);
+  turnEl.textContent = (isYou ? 'Твой ход' : `Ход: ${mpSlotDisplayName(cur)}`) + suffix;
+  turnEl.style.color = mpSlotColor(cur);
 }
 
 function renderMonopolyArea() {
@@ -1452,8 +1463,8 @@ function renderMonopolyArea() {
   const you = state.you;
 
   // Default selected tile = current player's position (when game running)
-  if (mpSelectedTile == null && state.currentPlayerId) {
-    const ps = state.playerState[state.currentPlayerId];
+  if (mpSelectedTile == null && state.currentSlot != null) {
+    const ps = state.slotState && state.slotState[state.currentSlot];
     mpSelectedTile = ps ? ps.position : 0;
   }
 
@@ -1466,17 +1477,16 @@ function renderMonopolyArea() {
   area.appendChild(grid);
 
   // Trade overlays — sit above the grid
-  if (state.mpPhase === 'playing' && you) {
+  if (state.mpPhase === 'playing' && state.mySlot != null) {
     const t = state.activeTrade;
-    if (t && t.toId === you.id) {
+    if (t && t.toSlot === state.mySlot) {
       area.appendChild(mpBuildIncomingTradeModal(t));
-    } else if (t && t.fromId === you.id) {
+    } else if (t && t.fromSlot === state.mySlot) {
       area.appendChild(mpBuildPendingTradeBanner(t));
     } else if (mpTradeOpen) {
-      area.appendChild(mpBuildTradeBuilderModal(you));
+      area.appendChild(mpBuildTradeBuilderModal());
     }
   } else {
-    // Reset draft when game leaves playing
     mpTradeOpen = false;
     mpTradeDraft = null;
     mpTradeError = '';
@@ -1488,10 +1498,10 @@ function mpBuildLeftAside() {
   aside.className = 'mp-aside-left';
 
   const isPlaying = state.mpPhase === 'playing' || state.mpPhase === 'finished';
-  const maxSlots = (state.settings && state.settings.maxPlayers) || 4;
-  const players = state.players.filter((p) => p.team === 'player');
-  const you = state.you;
-  const youInSlot = you && you.team === 'player';
+  const slots = state.slots || [];
+  const maxSlots = state.maxSlots || slots.length || 4;
+  const filledSlotsCount = slots.filter((s) => s.occupantId).length;
+  const mySlot = state.mySlot;
 
   // Slots section
   const slotsSection = document.createElement('div');
@@ -1502,32 +1512,32 @@ function mpBuildLeftAside() {
 
   const counter = document.createElement('div');
   counter.className = 'mp-aside-counter';
-  counter.textContent = `${players.length}/${maxSlots}`;
+  counter.textContent = `${filledSlotsCount}/${maxSlots}`;
   slotsSection.appendChild(counter);
 
   const rows = document.createElement('div');
   rows.className = 'mp-player-rows';
 
-  // During playing, use turnOrder for stable ordering. Otherwise use joined order.
-  const orderedIds = isPlaying ? state.turnOrder : players.map((p) => p.id);
-
   for (let i = 0; i < maxSlots; i++) {
-    const pid = orderedIds[i];
-    const p = pid ? state.players.find((pp) => pp.id === pid) : null;
-    const ps = pid ? (state.playerState && state.playerState[pid]) : null;
+    const slotInfo = slots.find((s) => s.slot === i);
+    const occupantId = slotInfo ? slotInfo.occupantId : null;
+    const occupantName = slotInfo ? slotInfo.occupantName : null;
+    const online = slotInfo ? slotInfo.online : false;
+    const ps = state.slotState ? state.slotState[i] : null;
+    const isMine = mySlot === i;
 
     const row = document.createElement('div');
     row.className = 'mp-player-row';
 
-    if (p) {
+    if (occupantId) {
       // Filled slot
-      if (isPlaying && pid === state.currentPlayerId) row.classList.add('is-active');
+      if (isPlaying && i === state.currentSlot) row.classList.add('is-active');
       if (ps && ps.bankrupt) row.classList.add('is-bankrupt');
-      if (p.disconnected) row.classList.add('is-offline');
+      if (!online) row.classList.add('is-offline');
 
       const dot = document.createElement('div');
       dot.className = 'mp-prow-dot';
-      dot.style.background = mpTokenColor(pid);
+      dot.style.background = mpSlotColor(i);
       row.appendChild(dot);
 
       const main = document.createElement('div');
@@ -1536,9 +1546,9 @@ function mpBuildLeftAside() {
       nameRow.className = 'mp-prow-name-row';
       const nm = document.createElement('span');
       nm.className = 'mp-prow-name';
-      nm.textContent = p.name;
+      nm.textContent = occupantName || `Слот ${i + 1}`;
       nameRow.appendChild(nm);
-      if (you && you.id === pid) {
+      if (isMine) {
         const tag = document.createElement('span');
         tag.className = 'mp-prow-tag';
         tag.textContent = 'вы';
@@ -1550,7 +1560,7 @@ function mpBuildLeftAside() {
         tag.textContent = '🔒';
         nameRow.appendChild(tag);
       }
-      if (p.disconnected) {
+      if (!online) {
         const tag = document.createElement('span');
         tag.className = 'mp-prow-tag mp-prow-tag-offline';
         tag.textContent = 'офлайн';
@@ -1560,17 +1570,17 @@ function mpBuildLeftAside() {
 
       const stats = document.createElement('div');
       stats.className = 'mp-prow-stats';
-      if (ps) {
-        const holdings = mpCountHoldings(pid);
+      if (isPlaying && ps) {
+        const holdings = mpCountHoldings(i);
         stats.innerHTML = `<span class="mp-money"><span class="mp-cur">${MP_CURRENCY}</span>${ps.money.toLocaleString('ru-RU')}</span> · ${holdings} ${holdings === 1 ? 'компания' : holdings >= 2 && holdings <= 4 ? 'компании' : 'компаний'}`;
       } else {
-        stats.innerHTML = `<span class="mp-prow-tag">в слоте</span>`;
+        stats.innerHTML = `<span class="mp-prow-tag">слот ${i + 1}</span>`;
       }
       main.appendChild(stats);
       row.appendChild(main);
 
       // Leave button (only when in lobby, only for self)
-      if (!isPlaying && you && you.id === pid) {
+      if (!isPlaying && isMine) {
         const leaveBtn = document.createElement('button');
         leaveBtn.className = 'mp-slot-leave';
         leaveBtn.textContent = '×';
@@ -1581,6 +1591,12 @@ function mpBuildLeftAside() {
     } else {
       // Empty slot
       row.classList.add('is-empty-slot');
+      const dot = document.createElement('div');
+      dot.className = 'mp-prow-dot';
+      dot.style.background = mpSlotColor(i);
+      dot.style.opacity = '0.35';
+      row.appendChild(dot);
+
       const emptyMain = document.createElement('div');
       emptyMain.className = 'mp-prow-main mp-empty-main';
       const slotLabel = document.createElement('div');
@@ -1588,11 +1604,11 @@ function mpBuildLeftAside() {
       slotLabel.textContent = `Слот ${i + 1}`;
       emptyMain.appendChild(slotLabel);
 
-      if (!isPlaying && !youInSlot && you) {
+      if (!isPlaying && mySlot == null) {
         const joinBtn = document.createElement('button');
         joinBtn.className = 'mp-slot-join';
         joinBtn.textContent = 'Занять';
-        joinBtn.onclick = () => send({ type: 'pick-team', team: 'player' });
+        joinBtn.onclick = () => send({ type: 'pick-team', team: 'player', slot: i });
         emptyMain.appendChild(joinBtn);
       } else if (!isPlaying) {
         const note = document.createElement('div');
@@ -1689,8 +1705,11 @@ function mpBuildActionBar(you) {
 
   const isHost = you && you.id === state.hostId;
   const isLobby = state.mpPhase === 'lobby';
-  const slotsFilled = state.players.filter((p) => p.team === 'player').length;
-  const maxSlots = (state.settings && state.settings.maxPlayers) || 4;
+  const slots = state.slots || [];
+  const slotsFilled = slots.filter((s) => s.occupantId).length;
+  const maxSlots = state.maxSlots || 4;
+  const mySlot = state.mySlot;
+  const isMyTurn = mySlot != null && mySlot === state.currentSlot;
 
   const status = document.createElement('div');
   status.className = 'mp-action-status';
@@ -1705,10 +1724,8 @@ function mpBuildActionBar(you) {
     else if (slotsFilled < maxSlots) name.textContent = `${slotsFilled}/${maxSlots} · можно стартовать`;
     else name.textContent = `${slotsFilled}/${maxSlots} · все слоты заняты`;
   } else {
-    const isYou = you && you.id === state.currentPlayerId;
-    label.textContent = isYou ? 'Ваш ход' : 'Сейчас ходит';
-    const cur = state.players.find((pp) => pp.id === state.currentPlayerId);
-    name.textContent = cur ? cur.name : '—';
+    label.textContent = isMyTurn ? 'Ваш ход' : 'Сейчас ходит';
+    name.textContent = state.currentSlot != null ? mpSlotDisplayName(state.currentSlot) : '—';
   }
   status.appendChild(label);
   status.appendChild(name);
@@ -1729,24 +1746,18 @@ function mpBuildActionBar(you) {
       b.textContent = 'Начать игру';
       b.onclick = () => send({ type: 'start-game' });
       btns.appendChild(b);
-    } else if (you && you.team !== 'player' && slotsFilled < maxSlots) {
-      const b = document.createElement('button');
-      b.className = 'mp-cta mp-cta-secondary';
-      b.textContent = 'Занять место';
-      b.onclick = () => send({ type: 'pick-team', team: 'player' });
-      btns.appendChild(b);
     } else {
       const wait = document.createElement('div');
       wait.style.cssText = 'font-family: var(--mp-mono); font-size: 11px; color: var(--mp-muted-ink); letter-spacing: 1px; text-transform: uppercase;';
-      wait.textContent = isHost ? 'нужно ≥2 игрока' : 'ждём старта';
+      wait.textContent = mySlot == null ? 'выбери слот слева' : (isHost ? 'нужно ≥2 игрока' : 'ждём старта');
       btns.appendChild(wait);
     }
     bar.appendChild(btns);
     return bar;
   }
 
-  const isYou = you && you.id === state.currentPlayerId;
-  if (isYou && state.mpPhase === 'playing') {
+  if (isMyTurn && state.mpPhase === 'playing') {
+    const ps = state.slotState && state.slotState[mySlot];
     if (state.mpTurn === 'rolling') {
       const b = document.createElement('button');
       b.className = 'mp-cta mp-cta-primary';
@@ -1754,7 +1765,6 @@ function mpBuildActionBar(you) {
       b.onclick = () => send({ type: 'roll-dice' });
       btns.appendChild(b);
     } else if (state.mpTurn === 'jail-decision') {
-      const ps = state.playerState[you.id];
       const r = document.createElement('button');
       r.className = 'mp-cta mp-cta-primary';
       r.textContent = 'Бросать на дубль';
@@ -1769,7 +1779,6 @@ function mpBuildActionBar(you) {
       }
     } else if (state.mpTurn === 'action') {
       if (state.pendingBuy) {
-        const ps = state.playerState[you.id];
         const canAfford = ps && ps.money >= state.pendingBuy.price;
         const b = document.createElement('button');
         b.className = 'mp-cta mp-cta-danger';
@@ -1800,9 +1809,9 @@ function mpBuildActionBar(you) {
   bar.appendChild(btns);
 
   // Trade button — visible to any non-bankrupt active player during the game.
-  if (state.mpPhase === 'playing' && you) {
-    const ps = state.playerState[you.id];
-    const inGame = ps && !ps.bankrupt;
+  if (state.mpPhase === 'playing' && mySlot != null) {
+    const myPs = state.slotState && state.slotState[mySlot];
+    const inGame = myPs && !myPs.bankrupt;
     if (inGame && !state.activeTrade) {
       const tradeBtn = document.createElement('button');
       tradeBtn.className = 'mp-cta mp-cta-secondary mp-cta-trade';
@@ -1911,11 +1920,10 @@ function mpRenderDeedInto(aside, sq) {
   rows.className = 'mp-deed-rows';
 
   if (sq.type === 'property' || sq.type === 'transport' || sq.type === 'utility') {
-    const ownerId = sq.slug ? state.ownership[sq.slug] : null;
-    const ownerP = ownerId ? state.players.find((pp) => pp.id === ownerId) : null;
+    const ownerSlot = sq.slug ? state.ownership[sq.slug] : null;
     const houses = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
     rows.appendChild(mpDeedRow('Цена', `<span class="mp-cur">${MP_CURRENCY}</span>${sq.price}`));
-    rows.appendChild(mpDeedRow('Владелец', ownerP ? ownerP.name : '—'));
+    rows.appendChild(mpDeedRow('Владелец', ownerSlot != null ? mpSlotDisplayName(ownerSlot) : '—'));
     if (sq.type === 'property') {
       const housesText = houses === 5 ? 'Отель' : `${houses}`;
       rows.appendChild(mpDeedRow('Домов', housesText));
@@ -1939,11 +1947,11 @@ function mpRenderDeedInto(aside, sq) {
     rentTable.className = 'mp-rent-table';
     const labels = ['База', '1 дом', '2 дома', '3 дома', '4 дома', 'Отель'];
     const houses = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
-    const ownerId = sq.slug ? state.ownership[sq.slug] : null;
+    const ownerSlot = sq.slug ? state.ownership[sq.slug] : null;
     // Owner without houses + full group → 2× base rent (highlight that fact)
-    const ownsAllInGroup = ownerId && state.board
+    const ownsAllInGroup = ownerSlot != null && state.board
       .filter((s) => s.type === 'property' && s.group === sq.group)
-      .every((s) => state.ownership[s.slug] === ownerId);
+      .every((s) => state.ownership[s.slug] === ownerSlot);
     for (let i = 0; i < sq.rent.length; i++) {
       const r = document.createElement('div');
       r.className = 'mp-rent-row';
@@ -1957,17 +1965,17 @@ function mpRenderDeedInto(aside, sq) {
     aside.appendChild(rentTable);
 
     // Build/sell controls — only for the current player on their own property when they own the group
-    const you = state.you;
-    const isMine = ownerId && you && ownerId === you.id;
-    const isMyTurn = you && you.id === state.currentPlayerId && state.mpPhase === 'playing';
+    const mySlot = state.mySlot;
+    const isMine = ownerSlot != null && mySlot != null && ownerSlot === mySlot;
+    const isMyTurn = mySlot != null && mySlot === state.currentSlot && state.mpPhase === 'playing';
     if (isMine && isMyTurn && ownsAllInGroup && !state.pendingBuy) {
       const groupSlugs = state.board.filter((s) => s.type === 'property' && s.group === sq.group).map((s) => s.slug);
       const groupHouses = groupSlugs.map((s) => (state.houses && state.houses[s]) || 0);
       const minInGroup = Math.min(...groupHouses);
       const maxInGroup = Math.max(...groupHouses);
-      const ps = state.playerState[you.id];
+      const ps = state.slotState && state.slotState[mySlot];
 
-      const canBuild = houses < 5 && houses === minInGroup && ps && ps.money >= (state.deedHouseCost || 0);
+      const canBuild = houses < 5 && houses === minInGroup && ps && ps.money >= (sq.house || 0);
       const canSell = houses > 0 && houses === maxInGroup;
       // We need the house cost — it's in the deck, not directly on the tile. Pull from board square if present.
       const houseCost = sq.house || 0;
@@ -2035,9 +2043,9 @@ function mpDeedRow(label, val) {
 // MONOPOLY TRADES (UI)
 // ============================================================
 
-function mpResetTradeDraft(toId) {
+function mpResetTradeDraft(toSlot) {
   mpTradeDraft = {
-    toId: toId || null,
+    toSlot: toSlot != null ? toSlot : null,
     fromMoney: 0,
     toMoney: 0,
     fromSlugs: new Set(),
@@ -2045,11 +2053,11 @@ function mpResetTradeDraft(toId) {
   };
 }
 
-function mpListOwned(playerId) {
+function mpListOwned(slot) {
   const owned = [];
-  if (!playerId || !state.ownership || !state.board) return owned;
+  if (slot == null || !state.ownership || !state.board) return owned;
   for (const slug of Object.keys(state.ownership)) {
-    if (state.ownership[slug] !== playerId) continue;
+    if (state.ownership[slug] !== slot) continue;
     const sq = state.board.find((s) => s.slug === slug);
     if (sq) owned.push(sq);
   }
@@ -2064,8 +2072,9 @@ function mpGroupHasHouses(slug) {
   return groupSlugs.some((s) => (state.houses && state.houses[s]) > 0);
 }
 
-function mpBuildTradeBuilderModal(you) {
-  const myId = you.id;
+function mpBuildTradeBuilderModal() {
+  const mySlot = state.mySlot;
+  if (mySlot == null) return document.createDocumentFragment();
   if (!mpTradeDraft) mpResetTradeDraft(null);
 
   const overlay = document.createElement('div');
@@ -2080,12 +2089,15 @@ function mpBuildTradeBuilderModal(you) {
   head.innerHTML = `<div class="mp-modal-title">Сделка</div><div class="mp-modal-sub">Выбери игрока и составь предложение</div>`;
   modal.appendChild(head);
 
-  // Counterparty selector — chips
-  const otherPlayers = state.turnOrder
-    .filter((pid) => pid !== myId && state.playerState[pid] && !state.playerState[pid].bankrupt)
-    .map((pid) => ({ id: pid, name: (state.players.find((pp) => pp.id === pid) || {}).name || '?' }));
+  // Counterparties = other slots in turnOrder, not bankrupt, with an occupant
+  const counterparties = (state.turnOrder || [])
+    .filter((s) => s !== mySlot && state.slotState && state.slotState[s] && !state.slotState[s].bankrupt)
+    .filter((s) => {
+      const info = state.slots && state.slots.find((x) => x.slot === s);
+      return info && info.occupantId; // require an occupant for now
+    });
 
-  if (otherPlayers.length === 0) {
+  if (counterparties.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'mp-modal-empty';
     empty.textContent = 'Нет других игроков';
@@ -2093,29 +2105,24 @@ function mpBuildTradeBuilderModal(you) {
   } else {
     const chips = document.createElement('div');
     chips.className = 'mp-trade-chips';
-    for (const p of otherPlayers) {
+    for (const s of counterparties) {
       const chip = document.createElement('button');
-      chip.className = 'mp-trade-chip' + (mpTradeDraft.toId === p.id ? ' is-active' : '');
-      chip.style.setProperty('--mp-chip-color', mpTokenColor(p.id));
-      chip.textContent = p.name;
+      chip.className = 'mp-trade-chip' + (mpTradeDraft.toSlot === s ? ' is-active' : '');
+      chip.style.setProperty('--mp-chip-color', mpSlotColor(s));
+      chip.textContent = mpSlotDisplayName(s);
       chip.onclick = () => {
-        if (mpTradeDraft.toId !== p.id) {
-          // Reset selections on counterparty change
-          mpResetTradeDraft(p.id);
-        }
+        if (mpTradeDraft.toSlot !== s) mpResetTradeDraft(s);
         render();
       };
       chips.appendChild(chip);
     }
     modal.appendChild(chips);
 
-    if (mpTradeDraft.toId) {
+    if (mpTradeDraft.toSlot != null) {
       const grid = document.createElement('div');
       grid.className = 'mp-trade-grid';
-
-      grid.appendChild(mpBuildTradeColumn('Отдаю', myId, true));
-      grid.appendChild(mpBuildTradeColumn('Получаю', mpTradeDraft.toId, false));
-
+      grid.appendChild(mpBuildTradeColumn('Отдаю', mySlot, true));
+      grid.appendChild(mpBuildTradeColumn('Получаю', mpTradeDraft.toSlot, false));
       modal.appendChild(grid);
     }
   }
@@ -2127,7 +2134,6 @@ function mpBuildTradeBuilderModal(you) {
     modal.appendChild(err);
   }
 
-  // Footer
   const foot = document.createElement('div');
   foot.className = 'mp-modal-foot';
   const cancel = document.createElement('button');
@@ -2139,7 +2145,7 @@ function mpBuildTradeBuilderModal(you) {
   const submit = document.createElement('button');
   submit.className = 'mp-cta mp-cta-primary';
   submit.textContent = 'Отправить';
-  const draftEmpty = !mpTradeDraft.toId
+  const draftEmpty = mpTradeDraft.toSlot == null
     || (mpTradeDraft.fromMoney === 0 && mpTradeDraft.toMoney === 0
         && mpTradeDraft.fromSlugs.size === 0 && mpTradeDraft.toSlugs.size === 0);
   submit.disabled = draftEmpty;
@@ -2147,13 +2153,12 @@ function mpBuildTradeBuilderModal(you) {
     mpTradeError = '';
     send({
       type: 'trade-propose',
-      toId: mpTradeDraft.toId,
+      toSlot: mpTradeDraft.toSlot,
       fromMoney: mpTradeDraft.fromMoney,
       toMoney: mpTradeDraft.toMoney,
       fromSlugs: [...mpTradeDraft.fromSlugs],
       toSlugs: [...mpTradeDraft.toSlugs],
     });
-    // Note: server will set state.activeTrade or send 'trade-error'.
     mpTradeOpen = false;
   };
   foot.appendChild(submit);
@@ -2163,7 +2168,7 @@ function mpBuildTradeBuilderModal(you) {
   return overlay;
 }
 
-function mpBuildTradeColumn(title, ownerId, isMine) {
+function mpBuildTradeColumn(title, ownerSlot, isMine) {
   const col = document.createElement('div');
   col.className = 'mp-trade-col';
 
@@ -2172,7 +2177,7 @@ function mpBuildTradeColumn(title, ownerId, isMine) {
   h.textContent = title;
   col.appendChild(h);
 
-  const ps = state.playerState[ownerId];
+  const ps = state.slotState && state.slotState[ownerSlot];
   const cap = ps ? ps.money : 0;
 
   // Money input
@@ -2201,7 +2206,7 @@ function mpBuildTradeColumn(title, ownerId, isMine) {
   // Property list
   const list = document.createElement('div');
   list.className = 'mp-trade-list';
-  const owned = mpListOwned(ownerId);
+  const owned = mpListOwned(ownerSlot);
   if (owned.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'mp-trade-empty';
@@ -2242,11 +2247,10 @@ function mpBuildTradeColumn(title, ownerId, isMine) {
 function mpBuildIncomingTradeModal(trade) {
   const overlay = document.createElement('div');
   overlay.className = 'mp-modal-overlay';
-  // Don't allow clicking outside to close — must accept/decline
   const modal = document.createElement('div');
   modal.className = 'mp-modal mp-trade-modal mp-trade-incoming';
 
-  const fromName = (state.players.find((p) => p.id === trade.fromId) || {}).name || '?';
+  const fromName = mpSlotDisplayName(trade.fromSlot);
 
   const head = document.createElement('div');
   head.className = 'mp-modal-head';
@@ -2323,7 +2327,7 @@ function mpRenderTradeSummary(title, offer) {
 function mpBuildPendingTradeBanner(trade) {
   const wrap = document.createElement('div');
   wrap.className = 'mp-trade-pending-banner';
-  const toName = (state.players.find((p) => p.id === trade.toId) || {}).name || '?';
+  const toName = mpSlotDisplayName(trade.toSlot);
   const text = document.createElement('span');
   text.textContent = `Сделка отправлена ${toName}. Ждём ответа…`;
   wrap.appendChild(text);
@@ -2345,11 +2349,11 @@ function mpBuildTile(sq) {
   if (mpSelectedTile === sq.index) tile.classList.add('is-selected');
   tile.onclick = () => { mpSelectedTile = sq.index; render(); };
 
-  // Owner frame color via custom prop
-  const ownerId = sq.slug ? state.ownership[sq.slug] : null;
-  if (ownerId) {
+  // Owner frame color via custom prop (slot-keyed)
+  const ownerSlot = sq.slug ? state.ownership[sq.slug] : null;
+  if (ownerSlot != null) {
     tile.dataset.ownerColor = '1';
-    tile.style.setProperty('--mp-owner-color', mpTokenColor(ownerId));
+    tile.style.setProperty('--mp-owner-color', mpSlotColor(ownerSlot));
   }
 
   if (edge === 'corner') {
@@ -2474,48 +2478,47 @@ function mpEnsureTokenLayer(boardEl) {
 
 function mpUpdateTokens() {
   if (!mpTokenLayer) return;
-  const present = new Set(state.turnOrder);
+  // Tokens are keyed by SLOT INDEX (as string for object-key purposes).
+  const present = new Set((state.turnOrder || []).map(String));
 
-  // Remove tokens for players no longer in turnOrder (game restart, etc.)
-  for (const pid of Object.keys(mpTokens)) {
-    if (!present.has(pid)) {
-      mpTokens[pid].remove();
-      delete mpTokens[pid];
-      delete mpDisplayed[pid];
-      delete mpAnimating[pid];
-      delete mpPendingTarget[pid];
+  // Remove tokens for slots no longer in turnOrder (game restart, etc.)
+  for (const key of Object.keys(mpTokens)) {
+    if (!present.has(key)) {
+      mpTokens[key].remove();
+      delete mpTokens[key];
+      delete mpDisplayed[key];
+      delete mpAnimating[key];
+      delete mpPendingTarget[key];
     }
   }
 
-  // Ensure a token element exists for each player & sync look
-  for (const pid of state.turnOrder) {
-    const ps = state.playerState[pid];
+  // Ensure a token element exists for each slot in play & sync look
+  for (const slot of (state.turnOrder || [])) {
+    const key = String(slot);
+    const ps = state.slotState && state.slotState[slot];
     if (!ps) continue;
-    const p = state.players.find((pp) => pp.id === pid);
-    let tok = mpTokens[pid];
+    let tok = mpTokens[key];
     if (!tok) {
       tok = document.createElement('div');
       tok.className = 'mp-token';
-      tok.dataset.pid = pid;
+      tok.dataset.slot = slot;
       mpTokenLayer.appendChild(tok);
-      mpTokens[pid] = tok;
+      mpTokens[key] = tok;
     }
-    tok.style.background = mpTokenColor(pid);
-    tok.title = p ? p.name : '';
-    tok.textContent = mpTokenLetter(p ? p.name : '?');
-    tok.classList.toggle('mp-token-active', pid === state.currentPlayerId && state.mpPhase === 'playing');
+    tok.style.background = mpSlotColor(slot);
+    const occName = mpSlotDisplayName(slot);
+    tok.title = occName;
+    tok.textContent = mpTokenLetter(occName);
+    tok.classList.toggle('mp-token-active', slot === state.currentSlot && state.mpPhase === 'playing');
     tok.classList.toggle('mp-token-bankrupt', !!ps.bankrupt);
 
-    // First-time appearance: snap to current server position with no animation
-    if (mpDisplayed[pid] === undefined) {
-      mpDisplayed[pid] = ps.position;
-    } else if (mpDisplayed[pid] !== ps.position) {
-      // Server's position differs from what's drawn → animate (or queue if mid-walk)
-      mpStartWalk(pid, ps.position);
+    if (mpDisplayed[key] === undefined) {
+      mpDisplayed[key] = ps.position;
+    } else if (mpDisplayed[key] !== ps.position) {
+      mpStartWalk(key, ps.position);
     }
   }
 
-  // Re-place every token using the currently displayed positions (handles stack offsets)
   mpPlaceAllTokens();
 }
 
@@ -2970,9 +2973,8 @@ function renderWinnerOverlay() {
   }
 
   if (state.gameMode === 'monopoly') {
-    if (state.winner) {
-      const w = state.players.find((p) => p.id === state.winner);
-      text.textContent = `${w ? w.name : '???'} — победитель!`;
+    if (state.winner != null) {
+      text.textContent = `${mpSlotDisplayName(state.winner)} — победитель!`;
     } else {
       text.textContent = 'Игра окончена!';
     }
