@@ -14,45 +14,6 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ============================================================
-// MAINTENANCE MODE
-// Toggle with env: MAINTENANCE_MODE=1, MAINTENANCE_PASS=<secret>.
-// Bypass: visit /?bypass=<secret> (or any path with that query) to
-// receive a 30-day cookie. Without it, all HTTP routes return 503
-// + maintenance.html and WebSocket upgrades are rejected.
-// ============================================================
-const MAINTENANCE_MODE = process.env.MAINTENANCE_MODE === '1';
-const MAINTENANCE_PASS = process.env.MAINTENANCE_PASS || '';
-const MAINTENANCE_COOKIE = 'mp_bypass';
-
-function hasMaintenanceBypass(req) {
-  if (!MAINTENANCE_MODE) return true;
-  const cookieHeader = req.headers && req.headers.cookie;
-  if (!cookieHeader) return false;
-  return cookieHeader.split(';').some((c) => {
-    const [k, v] = c.trim().split('=');
-    return k === MAINTENANCE_COOKIE && v === '1';
-  });
-}
-
-if (MAINTENANCE_MODE) {
-  app.use((req, res, next) => {
-    // Set bypass cookie if the right token arrives in the query string
-    if (req.query.bypass && MAINTENANCE_PASS && req.query.bypass === MAINTENANCE_PASS) {
-      res.setHeader('Set-Cookie', `${MAINTENANCE_COOKIE}=1; Path=/; Max-Age=${30 * 24 * 3600}; HttpOnly; SameSite=Lax`);
-      // Strip the query and redirect so the URL stays clean
-      const cleanPath = req.path === '/' ? '/' : req.path;
-      return res.redirect(302, cleanPath);
-    }
-    if (hasMaintenanceBypass(req)) return next();
-    res.status(200);
-    res.setHeader('Cache-Control', 'no-store');
-    res.sendFile(path.join(__dirname, 'public', 'maintenance.html'));
-  });
-
-  console.log(`[maintenance] enabled — bypass via ?bypass=${MAINTENANCE_PASS ? '***' : '(unset)'}`);
-}
-
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', express.json({ limit: '2mb' }));
 
@@ -974,10 +935,6 @@ function resolvePlayerName(name) {
 let nextPlayerId = 1;
 
 wss.on('connection', (ws, req) => {
-  if (!hasMaintenanceBypass(req)) {
-    try { ws.close(1013, 'maintenance'); } catch {}
-    return;
-  }
   let playerId = String(nextPlayerId++);
   let currentRoom = null;
 
