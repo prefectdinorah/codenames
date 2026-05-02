@@ -395,6 +395,24 @@
         strip.style.background = deck.groups[info?.group]?.color || '#444';
         cell.appendChild(strip);
       }
+
+      const info = cellInfo(deck, sq);
+      let imgUrl = null;
+      if (info && info.logoId) {
+        const logo = adm.logos.find((l) => l.id === info.logoId);
+        if (logo) imgUrl = logo.url;
+      } else if (info && info.logoUrl) {
+        imgUrl = info.logoUrl;
+      }
+      if (imgUrl) {
+        const img = document.createElement('img');
+        img.className = 'admin-cell-img';
+        img.src = imgUrl;
+        img.alt = info.name || '';
+        img.onerror = () => img.remove();
+        cell.appendChild(img);
+      }
+
       const label = document.createElement('div');
       label.className = 'admin-cell-label';
       label.textContent = cellDisplayName(deck, sq);
@@ -579,14 +597,18 @@
     if (!disabled) {
       const btns = document.createElement('div');
       btns.className = 'admin-logo-btns';
+      const refreshBoard = () => {
+        const boardEl = $('.admin-board-minigrid');
+        if (boardEl) renderBoardGrid(boardEl, adm.currentDeck, adm.currentDeck.locked);
+      };
       const pick = document.createElement('button');
       pick.textContent = 'Выбрать из библиотеки';
-      pick.onclick = (ev) => { ev.preventDefault(); openLogoPicker((logo) => { info.logoId = logo.id; delete info.logoUrl; renderCellEditor($('.admin-cell-editor'), adm.currentDeck, false); }); };
+      pick.onclick = (ev) => { ev.preventDefault(); openLogoPicker((logo) => { info.logoId = logo.id; delete info.logoUrl; renderCellEditor($('.admin-cell-editor'), adm.currentDeck, false); refreshBoard(); }); };
       btns.appendChild(pick);
       if (info.logoId || info.logoUrl) {
         const clear = document.createElement('button');
         clear.textContent = 'Убрать';
-        clear.onclick = (ev) => { ev.preventDefault(); delete info.logoId; delete info.logoUrl; renderCellEditor($('.admin-cell-editor'), adm.currentDeck, false); };
+        clear.onclick = (ev) => { ev.preventDefault(); delete info.logoId; delete info.logoUrl; renderCellEditor($('.admin-cell-editor'), adm.currentDeck, false); refreshBoard(); };
         btns.appendChild(clear);
       }
       l.appendChild(btns);

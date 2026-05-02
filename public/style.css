@@ -1614,12 +1614,15 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   justify-content: center;
 }
 .mp-tile-card::before {
-  /* Inset owner frame — transparent by default, colored when owned */
+  /* Owner frame — 5px ring at the outer edge, painted on top of the logo.
+     Transparent by default; coloured at 55% opacity when owned. */
   content: '';
   position: absolute;
-  inset: 5px;
-  border: 1.5px solid transparent;
+  inset: 0;
+  border: 5px solid transparent;
+  box-sizing: border-box;
   pointer-events: none;
+  opacity: 0.55;
   transition: border-color 240ms ease;
 }
 .mp-tile[data-owner-color] .mp-tile-card::before {
@@ -1635,12 +1638,19 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   height: 55%;
   transition: transform 220ms cubic-bezier(.2,.7,.2,1);
 }
-/* When a real logo image is present, fill the card so it reads at glance. */
+/* When a real logo image is present, the image takes the entire card body
+   (edge-to-edge, ignoring the owner frame which paints over the corners). */
 .mp-tile-glyph-image {
   width: 100%;
   height: 100%;
-  padding: 6%;
-  box-sizing: border-box;
+  padding: 0;
+}
+.mp-tile-glyph-image img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
 }
 .mp-tile-glyph img {
   max-width: 100%;
@@ -2942,8 +2952,21 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 }
 .admin-cell:hover { outline: 1px solid var(--mp-muted-ink); outline-offset: -1px; }
 .admin-cell-selected { outline: 2px solid var(--mp-accent); outline-offset: -2px; }
-.admin-cell-strip { height: 6px; flex-shrink: 0; margin: -3px -2px 3px; }
-.admin-cell-label { font-size: 8px; line-height: 1.1; text-align: center; word-break: break-word; }
+.admin-cell-strip { height: 6px; flex-shrink: 0; margin: -3px -2px 3px; position: relative; z-index: 1; }
+.admin-cell-label { font-size: 8px; line-height: 1.1; text-align: center; word-break: break-word; position: relative; z-index: 1; }
+.admin-cell-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 4px;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 0;
+}
+/* When a logo is present, the image is the visual ID — drop the text label. */
+.admin-cell:has(> .admin-cell-img) .admin-cell-label { display: none; }
 .admin-cell-idx {
   position: absolute;
   top: 2px;
