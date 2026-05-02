@@ -2432,11 +2432,12 @@ function mpBuildTile(sq) {
   const glyph = document.createElement('div');
   glyph.className = 'mp-tile-glyph';
   if (sq.image) {
+    glyph.classList.add('mp-tile-glyph-image');
     const img = document.createElement('img');
     img.src = sq.image;
     img.alt = sq.name || '';
     img.loading = 'lazy';
-    img.onerror = () => { img.style.display = 'none'; glyph.textContent = mpTokenLetter(sq.name); glyph.style.fontFamily = 'var(--mp-serif)'; glyph.style.fontSize = '24px'; };
+    img.onerror = () => { img.style.display = 'none'; glyph.classList.remove('mp-tile-glyph-image'); glyph.textContent = mpTokenLetter(sq.name); glyph.style.fontFamily = 'var(--mp-serif)'; glyph.style.fontSize = '24px'; };
     glyph.appendChild(img);
   } else {
     // Fallback: big letter for properties/transport/utility, symbol for special

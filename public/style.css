@@ -1635,6 +1635,13 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   height: 55%;
   transition: transform 220ms cubic-bezier(.2,.7,.2,1);
 }
+/* When a real logo image is present, fill the card so it reads at glance. */
+.mp-tile-glyph-image {
+  width: 100%;
+  height: 100%;
+  padding: 6%;
+  box-sizing: border-box;
+}
 .mp-tile-glyph img {
   max-width: 100%;
   max-height: 100%;
