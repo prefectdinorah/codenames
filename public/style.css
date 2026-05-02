@@ -1775,6 +1775,19 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
+.mp-corner-glyph {
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.mp-corner-glyph img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
 /* Corner insets by quadrant */
 .mp-tile-corner-br .mp-corner-body { top: 0; left: 0; right: var(--mp-tab-h); bottom: var(--mp-tab-h); }
 .mp-tile-corner-bl .mp-corner-body { top: 0; right: 0; left: var(--mp-tab-h); bottom: var(--mp-tab-h); }
@@ -2369,6 +2382,52 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   color: var(--mp-accent-ink);
 }
 .mp-cta-danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* Casino bet controls (replaces single CTA when on casino square) */
+.mp-casino-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 180px;
+}
+.mp-casino-label {
+  font-family: var(--mp-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--mp-muted-ink);
+  text-align: center;
+}
+.mp-casino-input {
+  width: 100%;
+  font-family: var(--mp-mono);
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--mp-hairline);
+  background: var(--mp-tile-bg);
+  color: var(--mp-ink);
+  text-align: center;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.mp-casino-btnrow {
+  display: flex;
+  gap: 6px;
+}
+.mp-casino-btnrow .mp-cta { flex: 1; }
+.mp-casino-red {
+  background: #c53030;
+  color: #fff;
+  border-color: #c53030;
+}
+.mp-casino-red:hover:not(:disabled) { background: #a82525; }
+.mp-casino-white {
+  background: #f5f1e6;
+  color: var(--mp-ink);
+  border: 1px solid var(--mp-ink);
+}
+.mp-casino-white:hover:not(:disabled) { background: #ffffff; }
 
 /* Tile selection ring */
 .mp-tile.is-selected .mp-tile-card { box-shadow: 0 0 0 2px var(--mp-accent); }
@@ -2976,11 +3035,12 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   font-size: 7px;
   opacity: 0.5;
 }
-.admin-cell-go, .admin-cell-jail, .admin-cell-go_to_jail, .admin-cell-parking {
+.admin-cell-go, .admin-cell-jail, .admin-cell-go_to_jail, .admin-cell-parking, .admin-cell-casino {
   background: var(--mp-panel-bg);
   font-weight: 600;
   align-items: center;
 }
+.admin-cell-casino { background: rgba(184, 92, 62, 0.18); }
 .admin-cell-tax    { background: rgba(184, 92, 62, 0.08); }
 .admin-cell-chance { background: rgba(184, 92, 62, 0.12); }
 .admin-cell-chest  { background: rgba(58, 125, 46, 0.10); }

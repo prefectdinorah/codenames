@@ -1769,6 +1769,8 @@ function createMonopolyGame(settings) {
     houses: {},              // slug → 0..5 (5 = hotel)
     log: [],
     pendingBuy: null,
+    pendingCasino: null,    // { slot, maxBet, name } — set when player lands on casino
+    lastCasino: null,       // { slot, color, outcome, win, amount, ts } — for banner
     // Chance / Community-chest decks. Filled at startMonopolyGame.
     chanceDeck: [],     // ids of cards remaining in the draw pile
     chanceDiscard: [],  // ids of cards already drawn this game
@@ -1819,11 +1821,14 @@ function mpSquareLabel(square, deck) {
   if (square.type === 'property') return deck.properties[square.slug]?.name || '';
   if (square.type === 'transport') return deck.transport[square.slug]?.name || '';
   if (square.type === 'utility') return deck.utilities[square.slug]?.name || '';
-  if (square.type === 'tax') return square.name;
+  // Special cells: prefer admin-set name, fall back to canonical label.
+  if (square.name) return square.name;
+  if (square.type === 'tax') return 'Налог';
   if (square.type === 'go') return 'GO';
   if (square.type === 'jail') return 'Тюрьма';
   if (square.type === 'go_to_jail') return 'В тюрьму';
   if (square.type === 'parking') return 'Парковка';
+  if (square.type === 'casino') return 'Казино';
   if (square.type === 'chance') return 'Шанс';
   if (square.type === 'chest') return 'Казна';
   return '';
@@ -1869,6 +1874,8 @@ function startMonopolyGame(room) {
   game.phase = 'playing';
   game.turn = 'rolling';
   game.pendingBuy = null;
+  game.pendingCasino = null;
+  game.lastCasino = null;
   game.winner = null;
   mpLog(game, `Игра началась: ${filledSlots.length} игроков, каждому по ${game.startingMoney}`);
   return true;
@@ -1966,12 +1973,20 @@ function mpResolveSquare(room, slot) {
       mpCharge(room, slot, ownerSlot, rent, info.name);
     }
   } else if (square.type === 'tax') {
-    mpCharge(room, slot, null, square.amount, square.name);
+    mpCharge(room, slot, null, square.amount, mpSquareLabel(square, deck));
   } else if (square.type === 'go_to_jail') {
     mpLog(game, `${slotName} отправляется в тюрьму`);
     mpSendToJail(room, slot);
   } else if (square.type === 'chance' || square.type === 'chest') {
     mpDrawCard(room, slot, square.type);
+  } else if (square.type === 'casino') {
+    const maxBet = Math.floor(ps.money / 2);
+    if (maxBet >= 1) {
+      game.pendingCasino = { slot, maxBet, name: mpSquareLabel(square, deck) };
+      mpLog(game, `${slotName} в казино — можно поставить до ${maxBet}`);
+    } else {
+      mpLog(game, `${slotName} в казино, но ставить нечего`);
+    }
   }
 
   if (game.phase === 'playing' && slot === game.currentSlot && !ps.bankrupt) {
@@ -2304,6 +2319,7 @@ function mpAdvanceToNextPlayer(room) {
   game.doublesCount = 0;
   game.dice = null;
   game.pendingBuy = null;
+  game.pendingCasino = null;
   const alive = game.turnOrder.filter((s) => !game.slotState[s].bankrupt);
   if (alive.length <= 1) { mpCheckWin(room); return; }
   do {
@@ -2342,10 +2358,45 @@ function mpSkipBuy(room, slot) {
   game.pendingBuy = null;
 }
 
+// Casino: red/white guess, win → +bet (2x payout), lose → -bet.
+// Bet capped at floor(money/2). Player may also skip without playing.
+function mpCasinoBet(room, slot, color, amount) {
+  const game = room.game;
+  if (game.phase !== 'playing' || slot !== game.currentSlot) return;
+  const pc = game.pendingCasino;
+  if (!pc || pc.slot !== slot) return;
+  if (color !== 'red' && color !== 'white') return;
+  const bet = parseInt(amount, 10);
+  if (!Number.isFinite(bet) || bet < 1) return;
+  const ps = game.slotState[slot];
+  const maxBet = Math.floor(ps.money / 2);
+  if (bet > maxBet) return;
+  const outcome = Math.random() < 0.5 ? 'red' : 'white';
+  const won = outcome === color;
+  const slotName = mpSlotName(room, slot);
+  if (won) {
+    ps.money += bet;
+    mpLog(game, `🎲 ${slotName} ставит ${bet} на ${color === 'red' ? 'красное' : 'белое'} — выпало ${outcome === 'red' ? 'красное' : 'белое'}, выигрыш +${bet}`);
+  } else {
+    ps.money -= bet;
+    mpLog(game, `🎲 ${slotName} ставит ${bet} на ${color === 'red' ? 'красное' : 'белое'} — выпало ${outcome === 'red' ? 'красное' : 'белое'}, проигрыш −${bet}`);
+  }
+  game.lastCasino = { slot, color, outcome, win: won, amount: bet, ts: Date.now() };
+  game.pendingCasino = null;
+}
+
+function mpCasinoSkip(room, slot) {
+  const game = room.game;
+  if (slot !== game.currentSlot || !game.pendingCasino) return;
+  mpLog(game, `${mpSlotName(room, slot)} обходит казино стороной`);
+  game.pendingCasino = null;
+}
+
 function mpEndTurn(room, slot) {
   const game = room.game;
   if (game.phase !== 'playing' || slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
+  if (game.pendingCasino) return;
   const ps = game.slotState[slot];
   const rolledDouble = game.dice && game.dice[0] === game.dice[1] && game.doublesCount > 0 && game.doublesCount < 3;
   if (rolledDouble && !ps.inJail && !ps.bankrupt) {
@@ -2413,6 +2464,8 @@ function mpSerializeBoard(game) {
     } else {
       out.name = mpSquareLabel(sq, deck);
       if (sq.type === 'tax') out.amount = sq.amount;
+      const img = mpLogoUrl(game, sq);
+      if (img) out.image = img;
     }
     return out;
   });
@@ -2453,8 +2506,10 @@ function getMonopolyState(room, playerId) {
     ownership: game.ownership,
     houses: game.houses,
     pendingBuy: isCurrent ? game.pendingBuy : null,
+    pendingCasino: isCurrent ? game.pendingCasino : null,
     activeTrade: tradeView,
     lastCard: game.lastCard,
+    lastCasino: game.lastCasino,
     log: game.log.slice(-20),
     turnOrder: game.turnOrder,
     winner: game.winner,
@@ -2517,6 +2572,18 @@ function handleMonopolyMsg(room, playerId, msg) {
 
   if (msg.type === 'skip-buy') {
     if (slot != null) mpSkipBuy(room, slot);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'casino-bet') {
+    if (slot != null) mpCasinoBet(room, slot, String(msg.color || ''), msg.amount);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'casino-skip') {
+    if (slot != null) mpCasinoSkip(room, slot);
     broadcastRoom(room);
     return;
   }

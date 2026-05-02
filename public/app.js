@@ -1381,6 +1381,7 @@ function mpCornerText(type) {
   if (type === 'go') return { title: 'СТАРТ', sub: 'забери 200' };
   if (type === 'jail') return { title: 'ТЮРЬМА', sub: 'в гостях' };
   if (type === 'parking') return { title: 'ПАРКОВКА', sub: 'отдых' };
+  if (type === 'casino') return { title: 'КАЗИНО', sub: 'красное / белое' };
   if (type === 'go_to_jail') return { title: 'В ТЮРЬМУ', sub: 'без права бросать' };
   return { title: type, sub: '' };
 }
@@ -1810,6 +1811,8 @@ function mpBuildActionBar(you) {
         s.textContent = 'Отказаться';
         s.onclick = () => send({ type: 'skip-buy' });
         btns.appendChild(s);
+      } else if (state.pendingCasino) {
+        btns.appendChild(mpRenderCasinoControls(ps, state.pendingCasino));
       } else {
         const e = document.createElement('button');
         e.className = 'mp-cta mp-cta-primary';
@@ -1841,6 +1844,58 @@ function mpBuildActionBar(you) {
   }
 
   return bar;
+}
+
+function mpRenderCasinoControls(ps, pc) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-casino-controls';
+  const maxBet = Math.max(0, Math.floor((ps?.money || 0) / 2));
+  const initial = Math.min(pc.maxBet || maxBet, maxBet, 100);
+  let bet = initial > 0 ? initial : 1;
+
+  const label = document.createElement('div');
+  label.className = 'mp-casino-label';
+  label.textContent = `Казино · ставка до ${MP_CURRENCY}${maxBet}`;
+  wrap.appendChild(label);
+
+  const inp = document.createElement('input');
+  inp.type = 'number';
+  inp.min = '1';
+  inp.max = String(Math.max(1, maxBet));
+  inp.value = String(bet);
+  inp.className = 'mp-casino-input';
+  inp.oninput = () => {
+    const v = parseInt(inp.value, 10);
+    bet = Number.isFinite(v) ? Math.max(1, Math.min(maxBet, v)) : 1;
+  };
+  wrap.appendChild(inp);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'mp-casino-btnrow';
+
+  const red = document.createElement('button');
+  red.className = 'mp-cta mp-casino-red';
+  red.textContent = 'Красное';
+  red.disabled = maxBet < 1;
+  red.onclick = () => send({ type: 'casino-bet', color: 'red', amount: bet });
+  btnRow.appendChild(red);
+
+  const white = document.createElement('button');
+  white.className = 'mp-cta mp-casino-white';
+  white.textContent = 'Белое';
+  white.disabled = maxBet < 1;
+  white.onclick = () => send({ type: 'casino-bet', color: 'white', amount: bet });
+  btnRow.appendChild(white);
+
+  wrap.appendChild(btnRow);
+
+  const skip = document.createElement('button');
+  skip.className = 'mp-cta mp-cta-secondary';
+  skip.textContent = 'Пройти мимо';
+  skip.onclick = () => send({ type: 'casino-skip' });
+  wrap.appendChild(skip);
+
+  return wrap;
 }
 
 function mpBuildRightAside() {
@@ -1931,7 +1986,7 @@ function mpRenderDeedInto(aside, sq) {
 
   const title = document.createElement('div');
   title.className = 'mp-deed-title';
-  title.textContent = sq.name || (sq.type === 'go' ? 'Старт' : sq.type === 'jail' ? 'Тюрьма' : sq.type === 'parking' ? 'Парковка' : sq.type === 'go_to_jail' ? 'В тюрьму' : sq.type === 'chance' ? 'Шанс' : sq.type === 'chest' ? 'Казна' : sq.type === 'tax' ? 'Налог' : '—');
+  title.textContent = sq.name || (sq.type === 'go' ? 'Старт' : sq.type === 'jail' ? 'Тюрьма' : sq.type === 'parking' ? 'Парковка' : sq.type === 'casino' ? 'Казино' : sq.type === 'go_to_jail' ? 'В тюрьму' : sq.type === 'chance' ? 'Шанс' : sq.type === 'chest' ? 'Казна' : sq.type === 'tax' ? 'Налог' : '—');
   aside.appendChild(title);
 
   // Type-specific info
@@ -2407,15 +2462,27 @@ function mpBuildTile(sq) {
     tile.classList.add('mp-tile-corner-' + mpCornerQuad(sq.index));
     const body = document.createElement('div');
     body.className = 'mp-corner-body';
-    const t = mpCornerText(sq.type);
+    if (sq.image) {
+      const glyph = document.createElement('div');
+      glyph.className = 'mp-corner-glyph';
+      const img = document.createElement('img');
+      img.src = sq.image;
+      img.alt = sq.name || '';
+      img.loading = 'lazy';
+      img.onerror = () => glyph.remove();
+      glyph.appendChild(img);
+      body.appendChild(glyph);
+    }
+    const defaults = mpCornerText(sq.type);
+    const customName = sq.name && sq.name.trim();
     const title = document.createElement('div');
     title.className = 'mp-corner-title';
-    title.textContent = t.title;
+    title.textContent = (customName || defaults.title).toUpperCase();
     body.appendChild(title);
-    if (t.sub) {
+    if (!customName && defaults.sub) {
       const sub = document.createElement('div');
       sub.className = 'mp-corner-sub';
-      sub.textContent = t.sub;
+      sub.textContent = defaults.sub;
       body.appendChild(sub);
     }
     tile.appendChild(body);

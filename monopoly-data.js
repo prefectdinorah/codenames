@@ -84,7 +84,7 @@ const board = [
   { type: 'chest' },                            // 17
   { type: 'property', slug: 'delivery_club' },  // 18
   { type: 'property', slug: 'samokat' },        // 19
-  { type: 'parking' },                          // 20
+  { type: 'casino' },                           // 20
   { type: 'property', slug: 'google' },         // 21
   { type: 'chance' },                           // 22
   { type: 'property', slug: 'microsoft' },      // 23

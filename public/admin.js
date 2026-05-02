@@ -367,11 +367,13 @@
   function cellDisplayName(deck, sq) {
     const info = cellInfo(deck, sq);
     if (info) return info.name;
-    if (sq.type === 'tax') return sq.name || 'Налог';
+    if (sq.name) return sq.name;
+    if (sq.type === 'tax') return 'Налог';
     if (sq.type === 'go') return 'GO';
     if (sq.type === 'jail') return 'Тюрьма';
     if (sq.type === 'go_to_jail') return 'В тюрьму';
     if (sq.type === 'parking') return 'Парковка';
+    if (sq.type === 'casino') return 'Казино';
     if (sq.type === 'chance') return 'Шанс';
     if (sq.type === 'chest') return 'Казна';
     return sq.type;
@@ -397,18 +399,19 @@
       }
 
       const info = cellInfo(deck, sq);
+      const logoTarget = info || sq;
       let imgUrl = null;
-      if (info && info.logoId) {
-        const logo = adm.logos.find((l) => l.id === info.logoId);
+      if (logoTarget.logoId) {
+        const logo = adm.logos.find((l) => l.id === logoTarget.logoId);
         if (logo) imgUrl = logo.url;
-      } else if (info && info.logoUrl) {
-        imgUrl = info.logoUrl;
+      } else if (logoTarget.logoUrl) {
+        imgUrl = logoTarget.logoUrl;
       }
       if (imgUrl) {
         const img = document.createElement('img');
         img.className = 'admin-cell-img';
         img.src = imgUrl;
-        img.alt = info.name || '';
+        img.alt = (info && info.name) || sq.name || '';
         img.onerror = () => img.remove();
         cell.appendChild(img);
       }
@@ -445,7 +448,7 @@
     const TYPE_LABELS = {
       property: 'Компания', transport: 'Транспорт', utility: 'Ресурс', tax: 'Налог',
       chance: 'Шанс', chest: 'Казна', go: 'Старт', jail: 'Тюрьма',
-      go_to_jail: 'В тюрьму', parking: 'Парковка',
+      go_to_jail: 'В тюрьму', casino: 'Казино', parking: 'Парковка',
     };
 
     const h = document.createElement('h3');
@@ -462,7 +465,7 @@
     typeLabel.textContent = 'Тип клетки';
     const typeSel = document.createElement('select');
     typeSel.disabled = locked;
-    for (const t of ['property', 'transport', 'utility', 'tax', 'chance', 'chest', 'go', 'jail', 'go_to_jail', 'parking']) {
+    for (const t of ['property', 'transport', 'utility', 'tax', 'chance', 'chest', 'casino', 'go', 'jail', 'go_to_jail', 'parking']) {
       const opt = document.createElement('option');
       opt.value = t; opt.textContent = TYPE_LABELS[t] || t;
       if (t === sq.type) opt.selected = true;
@@ -478,6 +481,7 @@
       }
       sq.type = t;
       delete sq.slug; delete sq.name; delete sq.amount;
+      delete sq.logoId; delete sq.logoUrl;
       if (t === 'property') {
         sq.slug = 'prop_' + Date.now().toString(36);
         const firstGroup = Object.keys(deck.groups)[0];
@@ -535,14 +539,29 @@
       }
 
       grid.appendChild(logoPickerField(info, locked));
-    } else if (sq.type === 'tax') {
-      grid.appendChild(textField('Название', sq.name || '', locked, (v) => { sq.name = v; refreshGrid(); }));
-      grid.appendChild(numberField('Сумма', sq.amount || 0, locked, (v) => { sq.amount = v; }));
     } else {
-      const note = document.createElement('div');
-      note.className = 'admin-note';
-      note.textContent = 'У этого типа нет редактируемых полей.';
-      grid.appendChild(note);
+      // Special cell (tax, chance, chest, casino, parking, go, jail, go_to_jail)
+      const SPECIAL_DEFAULTS = {
+        go: 'Старт', jail: 'Тюрьма', go_to_jail: 'В тюрьму',
+        parking: 'Парковка', casino: 'Казино',
+        chance: 'Шанс', chest: 'Казна', tax: 'Налог',
+      };
+      const nameLabel = document.createElement('label');
+      nameLabel.className = 'admin-field';
+      nameLabel.textContent = 'Название';
+      const nameInp = document.createElement('input');
+      nameInp.type = 'text';
+      nameInp.value = sq.name || '';
+      nameInp.placeholder = SPECIAL_DEFAULTS[sq.type] || sq.type;
+      nameInp.disabled = locked;
+      nameInp.oninput = () => { sq.name = nameInp.value; refreshGrid(); };
+      nameLabel.appendChild(nameInp);
+      grid.appendChild(nameLabel);
+
+      if (sq.type === 'tax') {
+        grid.appendChild(numberField('Сумма', sq.amount || 0, locked, (v) => { sq.amount = v; }));
+      }
+      grid.appendChild(logoPickerField(sq, locked));
     }
 
     function refreshGrid() {
