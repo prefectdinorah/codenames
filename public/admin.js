@@ -217,6 +217,7 @@
   }
 
   function renderDeckEditor(root) {
+    root.innerHTML = '';
     const deck = adm.currentDeck;
     const locked = deck.locked;
 
@@ -404,7 +405,13 @@
       idx.textContent = i;
       cell.appendChild(idx);
 
-      cell.onclick = () => { adm.editingCellIndex = i; renderDeckEditor($('#admin-tab-decks')); };
+      cell.onclick = () => {
+        adm.editingCellIndex = i;
+        $$('.admin-cell.admin-cell-selected', root).forEach((c) => c.classList.remove('admin-cell-selected'));
+        cell.classList.add('admin-cell-selected');
+        const editorBox = $('.admin-cell-editor');
+        if (editorBox) renderCellEditor(editorBox, adm.currentDeck, adm.currentDeck.locked);
+      };
       root.appendChild(cell);
     }
   }
