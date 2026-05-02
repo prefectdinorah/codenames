@@ -1622,7 +1622,7 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   border: 5px solid transparent;
   box-sizing: border-box;
   pointer-events: none;
-  opacity: 0.55;
+  opacity: 0.45;
   transition: border-color 240ms ease;
 }
 .mp-tile[data-owner-color] .mp-tile-card::before {
@@ -1650,7 +1650,7 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   height: 100%;
   max-width: none;
   max-height: none;
-  object-fit: cover;
+  object-fit: fill;
 }
 .mp-tile-glyph img {
   max-width: 100%;
