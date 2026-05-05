@@ -246,16 +246,18 @@ function createCodenamesGame(settings) {
   const { teamCount, gridRows, gridCols } = settings;
   const totalCards = gridRows * gridCols;
   const selected = shuffle(codenamesWords).slice(0, totalCards);
-  const teams = TEAM_IDS.slice(0, teamCount);
-  const shuffledTeams = shuffle([...teams]);
-  const firstTeam = shuffledTeams[0];
+  const availableTeams = TEAM_IDS.slice(0, teamCount);
+  // This order is both the turn order and the decreasing-card-count order.
+  // First team gets +1 word, each following team gets one fewer.
+  const teams = shuffle([...availableTeams]);
+  const firstTeam = teams[0];
 
   const basePerTeam = Math.floor((totalCards - 1) / (teamCount + 1));
   const distribution = [];
-  for (let i = 0; i < basePerTeam + 1; i++) distribution.push(shuffledTeams[0]);
-  for (let ti = 1; ti < shuffledTeams.length; ti++) {
+  for (let i = 0; i < basePerTeam + 1; i++) distribution.push(teams[0]);
+  for (let ti = 1; ti < teams.length; ti++) {
     const count = Math.max(1, basePerTeam - (ti - 1));
-    for (let i = 0; i < count; i++) distribution.push(shuffledTeams[ti]);
+    for (let i = 0; i < count; i++) distribution.push(teams[ti]);
   }
   distribution.push('assassin');
   while (distribution.length < totalCards) distribution.push('neutral');
