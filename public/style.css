@@ -1929,32 +1929,31 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 }
 .mp-tile-tab[data-group] .mp-tab-cur { color: rgba(255,255,255,0.75); }
 
-/* Houses (dots at inner edge of card body) */
+/* Influence markers (stars away from the name band) */
 .mp-tile-houses {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 4px;
+  left: 4px;
+  right: auto;
+  bottom: 4px;
   display: flex;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   pointer-events: none;
+  z-index: 3;
 }
 .mp-tile-house {
-  width: 5px;
-  height: 5px;
-  background: #2ecc71;
-  border-radius: 1px;
-  box-shadow: 0 0.5px 1px rgba(0,0,0,0.3);
+  color: #1f6feb;
+  font-size: 9px;
+  line-height: 1;
+  text-shadow: 0 0.5px 1px rgba(0,0,0,0.25);
 }
-.mp-tile[data-owner-color] .mp-tile-house { background: var(--mp-owner-color); }
 .mp-tile-hotel {
-  width: 14px;
-  height: 8px;
-  background: #c95a2e;
-  border-radius: 1px;
-  box-shadow: 0 0.5px 1.5px rgba(0,0,0,0.4);
+  color: #f1c40f;
+  font-size: 18px;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
 }
+.mp-tile-top .mp-tile-houses { top: 4px; bottom: auto; }
 
 /* Corner tiles — card body inset by TAB_HEIGHT on two outer sides */
 .mp-tile-corner .mp-corner-body {
@@ -3580,6 +3579,53 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   font-size: 11px;
 }
 .admin-group-row button:hover { color: var(--mp-ink); }
+
+/* Cards editor */
+.admin-cards-section {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.admin-card-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 180px minmax(160px, 220px) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35);
+}
+.admin-card-row textarea,
+.admin-card-row select,
+.admin-card-row input {
+  width: 100%;
+  background: #fff;
+  border: 0.5px solid var(--mp-hairline);
+  color: var(--mp-ink);
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-family: var(--mp-ui);
+  font-size: 13px;
+}
+.admin-card-row textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+.admin-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.admin-card-actions button {
+  border: 0.5px solid var(--mp-hairline);
+  background: transparent;
+  color: var(--mp-ink);
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
 
 /* Logos tab */
 .admin-upload-form {

@@ -285,6 +285,139 @@
 
     // Groups editor — collapsible at the bottom
     root.appendChild(renderGroupsEditor(deck, locked));
+    root.appendChild(renderCardsEditor(deck, locked));
+  }
+
+  function normalizeCards(deck) {
+    if (!Array.isArray(deck.chanceCards)) deck.chanceCards = [];
+    if (!Array.isArray(deck.chestCards)) deck.chestCards = [];
+  }
+
+  function renderCardsEditor(deck, locked) {
+    normalizeCards(deck);
+    const box = document.createElement('details');
+    box.className = 'admin-groups-box admin-cards-box';
+    const sum = document.createElement('summary');
+    sum.textContent = `Карточки: Шанс (${deck.chanceCards.length}) / Казна (${deck.chestCards.length})`;
+    box.appendChild(sum);
+    box.appendChild(renderCardList(deck, 'chance', locked));
+    box.appendChild(renderCardList(deck, 'chest', locked));
+    return box;
+  }
+
+  function renderCardList(deck, kind, locked) {
+    const title = kind === 'chance' ? 'Шанс' : 'Казна';
+    const cards = kind === 'chance' ? deck.chanceCards : deck.chestCards;
+    const section = document.createElement('div');
+    section.className = 'admin-cards-section';
+    const h = document.createElement('div');
+    h.className = 'admin-section-label';
+    h.textContent = title;
+    section.appendChild(h);
+    for (let i = 0; i < cards.length; i++) {
+      section.appendChild(renderCardEditorRow(deck, kind, cards[i], i, locked));
+    }
+    if (!locked) {
+      const add = document.createElement('button');
+      add.className = 'admin-btn-ghost';
+      add.textContent = '+ Добавить карточку';
+      add.onclick = () => {
+        cards.push({ id: `${kind}_${Date.now().toString(36)}`, text: 'Новая карточка', effect: { type: 'noop' } });
+        renderDecksTab();
+      };
+      section.appendChild(add);
+    }
+    return section;
+  }
+
+  function renderCardEditorRow(deck, kind, card, idx, locked) {
+    const cards = kind === 'chance' ? deck.chanceCards : deck.chestCards;
+    if (!card.effect) card.effect = { type: 'noop' };
+    const row = document.createElement('div');
+    row.className = 'admin-card-row';
+
+    const text = document.createElement('textarea');
+    text.value = card.text || '';
+    text.disabled = locked;
+    text.placeholder = 'Текст карточки';
+    text.oninput = () => { card.text = text.value; };
+    row.appendChild(text);
+
+    const type = document.createElement('select');
+    type.disabled = locked;
+    const types = [
+      ['noop', 'Только текст'],
+      ['pay-bank', 'Заплатить банку'],
+      ['collect-bank', 'Получить из банка'],
+      ['move-to-index', 'Перейти на клетку'],
+      ['move-by', 'Сдвинуться на N'],
+      ['go-to-jail', 'В тюрьму'],
+      ['pay-each', 'Заплатить каждому'],
+      ['collect-each', 'Получить с каждого'],
+    ];
+    for (const [value, label] of types) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      type.appendChild(opt);
+    }
+    type.value = card.effect.type || 'noop';
+    type.onchange = () => { card.effect = { type: type.value }; renderDecksTab(); };
+    row.appendChild(type);
+
+    const fields = document.createElement('div');
+    fields.className = 'admin-card-fields';
+    const effectType = card.effect.type || 'noop';
+    if (['pay-bank', 'collect-bank', 'pay-each', 'collect-each'].includes(effectType)) {
+      fields.appendChild(cardNumberInput(card.effect, 'amount', 'Сумма', locked));
+    } else if (effectType === 'move-by') {
+      fields.appendChild(cardNumberInput(card.effect, 'steps', 'Шаги', locked));
+    } else if (effectType === 'move-to-index') {
+      const target = document.createElement('select');
+      target.disabled = locked;
+      for (let i = 0; i < deck.board.length; i++) {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = `${i}: ${cellDisplayName(deck, deck.board[i])}`;
+        target.appendChild(opt);
+      }
+      target.value = String(card.effect.target || 0);
+      target.onchange = () => { card.effect.target = parseInt(target.value, 10) || 0; };
+      fields.appendChild(target);
+    }
+    row.appendChild(fields);
+
+    if (!locked) {
+      const actions = document.createElement('div');
+      actions.className = 'admin-card-actions';
+      const up = document.createElement('button');
+      up.textContent = '↑';
+      up.disabled = idx === 0;
+      up.onclick = () => { [cards[idx - 1], cards[idx]] = [cards[idx], cards[idx - 1]]; renderDecksTab(); };
+      actions.appendChild(up);
+      const down = document.createElement('button');
+      down.textContent = '↓';
+      down.disabled = idx === cards.length - 1;
+      down.onclick = () => { [cards[idx + 1], cards[idx]] = [cards[idx], cards[idx + 1]]; renderDecksTab(); };
+      actions.appendChild(down);
+      const del = document.createElement('button');
+      del.className = 'admin-btn-danger';
+      del.textContent = '✕';
+      del.onclick = () => { cards.splice(idx, 1); renderDecksTab(); };
+      actions.appendChild(del);
+      row.appendChild(actions);
+    }
+    return row;
+  }
+
+  function cardNumberInput(effect, key, label, locked) {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.placeholder = label;
+    input.value = String(effect[key] ?? 0);
+    input.disabled = locked;
+    input.oninput = () => { effect[key] = parseInt(input.value, 10) || 0; };
+    return input;
   }
 
   function renderGroupsEditor(deck, locked) {
@@ -522,16 +655,16 @@
         grpLabel.appendChild(grpSel);
         grid.appendChild(grpLabel);
 
-        grid.appendChild(numberField('Стоимость дома', info.house || 0, locked, (v) => { info.house = v; }));
+        grid.appendChild(numberField('Стоимость влияния', info.house || 0, locked, (v) => { info.house = v; }));
 
         const rentTitle = document.createElement('div');
         rentTitle.className = 'admin-subtitle';
-        rentTitle.textContent = 'Рента по уровню застройки';
+        rentTitle.textContent = 'Рента по степени влияния';
         grid.appendChild(rentTitle);
 
         const rentBox = document.createElement('div');
         rentBox.className = 'admin-rent-grid';
-        const rentLabels = ['База', '1 дом', '2 дома', '3 дома', '4 дома', 'Отель'];
+        const rentLabels = ['База', '1 влияние', '2 влияние', '3 влияние', '4 влияние', 'Максимум'];
         for (let r = 0; r < 6; r++) {
           rentBox.appendChild(numberField(rentLabels[r], info.rent[r] || 0, locked, (v) => { info.rent[r] = v; }));
         }

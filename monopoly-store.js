@@ -42,7 +42,20 @@ function classicDeck() {
     transport: JSON.parse(JSON.stringify(monopolyData.transport)),
     utilities: JSON.parse(JSON.stringify(monopolyData.utilities)),
     board: JSON.parse(JSON.stringify(monopolyData.board)),
+    chanceCards: JSON.parse(JSON.stringify(monopolyData.chanceCards)),
+    chestCards: JSON.parse(JSON.stringify(monopolyData.chestCards)),
   };
+}
+
+function normalizeDeck(deck) {
+  if (!deck) return classicDeck();
+  if (!Array.isArray(deck.chanceCards) || deck.chanceCards.length === 0) {
+    deck.chanceCards = JSON.parse(JSON.stringify(monopolyData.chanceCards));
+  }
+  if (!Array.isArray(deck.chestCards) || deck.chestCards.length === 0) {
+    deck.chestCards = JSON.parse(JSON.stringify(monopolyData.chestCards));
+  }
+  return deck;
 }
 
 function emptyState() {
@@ -69,6 +82,7 @@ async function loadFromS3() {
     if (!parsed.logos) parsed.logos = {};
     // Always ensure classic deck exists and is fresh
     parsed.decks.classic = classicDeck();
+    for (const deck of Object.values(parsed.decks)) normalizeDeck(deck);
     return parsed;
   } catch (err) {
     if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
@@ -106,7 +120,7 @@ function getState() { return state; }
 
 function getDeck(deckId) {
   if (!state) return classicDeck();
-  return state.decks[deckId] || state.decks.classic;
+  return normalizeDeck(state.decks[deckId] || state.decks.classic);
 }
 
 function listDecks() {
@@ -119,7 +133,7 @@ async function saveDeck(deckId, deck) {
   if (state.decks[deckId]?.locked && deckId === 'classic') {
     throw new Error('classic deck is read-only — duplicate first');
   }
-  state.decks[deckId] = { ...deck, locked: false };
+  state.decks[deckId] = normalizeDeck({ ...deck, locked: false });
   await saveToS3();
   return state.decks[deckId];
 }

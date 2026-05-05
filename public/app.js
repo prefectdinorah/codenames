@@ -1430,6 +1430,9 @@ let mpDiceAnimToken = 0;
 let mpDiceAnimIsRunning = false;
 /** When set, mpUpdateTokens must not start token walk — dice sequence runs first. */
 let mpDeferredWalkAfterDice = null;
+let mpLastAnimationSeq = 0;
+let mpAnimationPlaying = false;
+let mpAnimationSlots = new Set();
 
 // Chance/Chest card overlay state.
 let mpLastSeenCardKey;          // undefined until first state arrives
@@ -1475,6 +1478,17 @@ function mpUnmortgageCost(sq) {
   return Math.ceil(mpMortgageValue(sq) * 1.1);
 }
 
+function mpIsMortgaged(slug) {
+  return !!(slug && state.mortgaged && state.mortgaged[slug]);
+}
+
+function mpMortgageTurnsLeft(slug) {
+  const m = slug && state.mortgaged ? state.mortgaged[slug] : null;
+  if (!m) return null;
+  if (m === true) return 15;
+  return m.remainingOwnerTurns;
+}
+
 function renderMonopolyTurnInfo() {
   const turnEl = $('#turn-indicator');
   if (state.mpPhase !== 'playing') { turnEl.textContent = ''; return; }
@@ -1510,15 +1524,14 @@ function renderMonopolyArea() {
 
   area.appendChild(grid);
 
-  // Card draw banner — detect new lastCard and show for ~4s
+  // Card draw banner — detect new lastCard and show for ~4s.
+  // During queued Monopoly animation the card step reveals it at the right time.
   const cardKey = state.lastCard ? `${state.lastCard.id}-${state.lastCard.ts}` : '';
   if (mpLastSeenCardKey === undefined) {
     mpLastSeenCardKey = cardKey;
-  } else if (cardKey && cardKey !== mpLastSeenCardKey) {
+  } else if (!mpAnimationPlaying && cardKey && cardKey !== mpLastSeenCardKey) {
     mpLastSeenCardKey = cardKey;
-    mpCardBannerVisible = true;
-    if (mpCardBannerTimer) clearTimeout(mpCardBannerTimer);
-    mpCardBannerTimer = setTimeout(() => { mpCardBannerVisible = false; render(); }, 4000);
+    mpShowCardBanner(state.lastCard);
   }
   if (mpCardBannerVisible && state.lastCard) {
     area.appendChild(mpBuildCardBanner(state.lastCard));
@@ -1539,6 +1552,87 @@ function renderMonopolyArea() {
     mpTradeDraft = null;
     mpTradeError = '';
   }
+
+  mpMaybeStartAnimationQueue();
+}
+
+function mpShowCardBanner(card) {
+  if (!card) return;
+  mpCardBannerVisible = true;
+  if (mpCardBannerTimer) clearTimeout(mpCardBannerTimer);
+  mpCardBannerTimer = setTimeout(() => { mpCardBannerVisible = false; render(); }, 4000);
+}
+
+function mpMaybeStartAnimationQueue() {
+  if (mpAnimationPlaying) return;
+  const seq = state.animationSeq || 0;
+  const events = Array.isArray(state.animationEvents) ? state.animationEvents : [];
+  if (!seq || seq <= mpLastAnimationSeq || events.length === 0) return;
+  mpLastAnimationSeq = seq;
+  mpPlayAnimationQueue(events);
+}
+
+async function mpPlayAnimationQueue(events) {
+  mpAnimationPlaying = true;
+  mpAnimationSlots = new Set(events.filter((e) => e.slot != null).map((e) => String(e.slot)));
+  try {
+    for (const ev of events) {
+      if (ev.type === 'dice' && ev.dice) {
+        await mpAnimateDiceOnly(ev.dice[0], ev.dice[1]);
+      } else if ((ev.type === 'move' || ev.type === 'card-move' || ev.type === 'send-to-jail') && ev.slot != null && ev.to != null) {
+        await mpAnimateTokenTo(String(ev.slot), ev.to);
+      } else if (ev.type === 'card' && ev.card) {
+        mpLastSeenCardKey = `${ev.card.id}-${ev.card.ts}`;
+        mpShowCardBanner(ev.card);
+        await mpDelay(900);
+      }
+    }
+  } finally {
+    mpAnimationPlaying = false;
+    mpAnimationSlots = new Set();
+    mpUpdateTokens();
+    render();
+  }
+}
+
+function mpDelay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function mpAnimateDiceOnly(d1, d2) {
+  return new Promise((resolve) => {
+    if (!mpDiceContainer || !mpDiceThrowLayer) { resolve(); return; }
+    mpPrevDice = [d1, d2];
+    const token = ++mpDiceAnimToken;
+    mpDiceAnimIsRunning = true;
+    const pair = mpRenderThrowDice(d1, d2, 'mp-dice-pair--table-throw');
+    if (!pair) { resolve(); return; }
+    const finish = () => {
+      if (token !== mpDiceAnimToken) return;
+      mpRenderThrowDice(d1, d2, 'mp-dice-pair--table-final');
+      setTimeout(() => {
+        mpRenderDiceFinal(d1, d2);
+        mpDiceAnimIsRunning = false;
+        resolve();
+      }, 520);
+    };
+    const fallback = setTimeout(finish, 1300);
+    pair.addEventListener('animationend', (e) => {
+      if (e.target !== pair) return;
+      clearTimeout(fallback);
+      finish();
+    }, { once: true });
+  });
+}
+
+async function mpAnimateTokenTo(key, target) {
+  if (mpDisplayed[key] === undefined) {
+    mpDisplayed[key] = target;
+    mpPlaceAllTokens();
+    return;
+  }
+  if (mpDisplayed[key] === target) return;
+  await mpStartWalk(key, target);
 }
 
 function mpBuildLeftAside() {
@@ -1775,7 +1869,7 @@ function mpBuildActionBar(you) {
   } else if (state.pendingAuction) {
     label.textContent = 'Аукцион';
     const a = state.pendingAuction;
-    name.textContent = `${a.name} · ${a.currentBid ? `${MP_CURRENCY}${a.currentBid}` : 'нет ставок'}`;
+    name.textContent = `${a.name} · ${a.currentBid ? `${MP_CURRENCY}${a.currentBid}` : `старт ${MP_CURRENCY}${a.price}`}`;
   } else if (state.pendingDebt) {
     label.textContent = 'Долг';
     const d = state.pendingDebt;
@@ -1824,19 +1918,19 @@ function mpBuildActionBar(you) {
     note.textContent = a.currentBidder != null ? `лидирует ${mpSlotDisplayName(a.currentBidder)}` : `стартовая цена ${MP_CURRENCY}${a.price}`;
     btns.appendChild(note);
     if (isActiveBidder && !isLeader) {
-      const inc10 = a.currentBid + 10;
-      const inc50 = a.currentBid + 50;
+      const minBid = a.currentBid > 0 ? a.currentBid + 10 : a.price;
+      const jumpBid = a.currentBid > 0 ? a.currentBid + 50 : a.price + 50;
       const b10 = document.createElement('button');
       b10.className = 'mp-cta mp-cta-primary';
-      b10.textContent = `${MP_CURRENCY}${inc10}`;
-      b10.disabled = !ps || ps.money < inc10;
-      b10.onclick = () => send({ type: 'auction-bid', amount: inc10 });
+      b10.textContent = `${MP_CURRENCY}${minBid}`;
+      b10.disabled = !ps || ps.money < minBid;
+      b10.onclick = () => send({ type: 'auction-bid', amount: minBid });
       btns.appendChild(b10);
       const b50 = document.createElement('button');
       b50.className = 'mp-cta mp-cta-secondary';
-      b50.textContent = `${MP_CURRENCY}${inc50}`;
-      b50.disabled = !ps || ps.money < inc50;
-      b50.onclick = () => send({ type: 'auction-bid', amount: inc50 });
+      b50.textContent = `${MP_CURRENCY}${jumpBid}`;
+      b50.disabled = !ps || ps.money < jumpBid;
+      b50.onclick = () => send({ type: 'auction-bid', amount: jumpBid });
       btns.appendChild(b50);
       const pass = document.createElement('button');
       pass.className = 'mp-cta mp-cta-secondary';
@@ -1854,6 +1948,11 @@ function mpBuildActionBar(you) {
       wait.textContent = 'ожидание аукциона';
       btns.appendChild(wait);
     }
+  } else if (mpAnimationPlaying) {
+    const wait = document.createElement('div');
+    wait.style.cssText = 'font-family: var(--mp-mono); font-size: 11px; color: var(--mp-muted-ink); letter-spacing: 1px; text-transform: uppercase;';
+    wait.textContent = 'разыгрываем ход';
+    btns.appendChild(wait);
   } else if (state.pendingDebt && state.mpPhase === 'playing') {
     const d = state.pendingDebt;
     const ps = mySlot != null ? state.slotState?.[mySlot] : null;
@@ -1867,7 +1966,7 @@ function mpBuildActionBar(you) {
       if (!ps || ps.money < d.amount) {
         const hint = document.createElement('div');
         hint.style.cssText = 'font-family: var(--mp-mono); font-size: 10px; color: var(--mp-muted-ink); letter-spacing: 1px; text-transform: uppercase;';
-        hint.textContent = 'продай постройки или заложи активы';
+        hint.textContent = 'продай влияние или заложи активы';
         btns.appendChild(hint);
       }
     } else {
@@ -2096,13 +2195,14 @@ function mpRenderDeedInto(aside, sq) {
   if (sq.type === 'property' || sq.type === 'transport' || sq.type === 'utility') {
     const ownerSlot = sq.slug ? state.ownership[sq.slug] : null;
     const houses = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
-    const isMortgaged = !!(sq.slug && state.mortgaged && state.mortgaged[sq.slug]);
+    const isMortgaged = mpIsMortgaged(sq.slug);
+    const turnsLeft = mpMortgageTurnsLeft(sq.slug);
     rows.appendChild(mpDeedRow('Цена', `<span class="mp-cur">${MP_CURRENCY}</span>${sq.price}`));
     rows.appendChild(mpDeedRow('Владелец', ownerSlot != null ? mpSlotDisplayName(ownerSlot) : '—'));
-    rows.appendChild(mpDeedRow('Залог', isMortgaged ? 'заложено' : `<span class="mp-cur">${MP_CURRENCY}</span>${mpMortgageValue(sq)}`));
+    rows.appendChild(mpDeedRow('Залог', isMortgaged ? `заложено · ${turnsLeft ?? '?'} ход.` : `<span class="mp-cur">${MP_CURRENCY}</span>${mpMortgageValue(sq)}`));
     if (sq.type === 'property') {
-      const housesText = houses === 5 ? 'Отель' : `${houses}`;
-      rows.appendChild(mpDeedRow('Домов', housesText));
+      const influenceText = houses === 5 ? 'Максимум' : `${houses}`;
+      rows.appendChild(mpDeedRow('Влияние', influenceText));
     }
   } else if (sq.type === 'tax') {
     rows.appendChild(mpDeedRow('Сумма', `<span class="mp-cur">−${MP_CURRENCY}</span>${sq.amount}`));
@@ -2121,7 +2221,7 @@ function mpRenderDeedInto(aside, sq) {
     aside.appendChild(h2);
     const rentTable = document.createElement('div');
     rentTable.className = 'mp-rent-table';
-    const labels = ['База', '1 дом', '2 дома', '3 дома', '4 дома', 'Отель'];
+    const labels = ['База', '1 влияние', '2 влияние', '3 влияние', '4 влияние', 'Максимум'];
     const houses = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
     const ownerSlot = sq.slug ? state.ownership[sq.slug] : null;
     // Owner without houses + full group → 2× base rent (highlight that fact)
@@ -2144,7 +2244,7 @@ function mpRenderDeedInto(aside, sq) {
     const mySlot = state.mySlot;
     const isMine = ownerSlot != null && mySlot != null && ownerSlot === mySlot;
     const isMyTurn = mySlot != null && mySlot === state.currentSlot && state.mpPhase === 'playing';
-    if (isMine && isMyTurn && ownsAllInGroup && !state.pendingBuy) {
+    if (isMine && isMyTurn && ownsAllInGroup) {
       const groupSlugs = state.board.filter((s) => s.type === 'property' && s.group === sq.group).map((s) => s.slug);
       const groupHouses = groupSlugs.map((s) => (state.houses && state.houses[s]) || 0);
       const groupMortgaged = groupSlugs.some((s) => state.mortgaged && state.mortgaged[s]);
@@ -2152,7 +2252,7 @@ function mpRenderDeedInto(aside, sq) {
       const maxInGroup = Math.max(...groupHouses);
       const ps = state.slotState && state.slotState[mySlot];
 
-      const canBuild = !state.pendingDebt && !groupMortgaged && houses < 5 && houses === minInGroup && ps && ps.money >= (sq.house || 0);
+      const canBuild = !state.pendingBuy && !state.pendingDebt && !groupMortgaged && houses < 5 && houses === minInGroup && ps && ps.money >= (sq.house || 0);
       const canSell = houses > 0 && houses === maxInGroup;
       // We need the house cost — it's in the deck, not directly on the tile. Pull from board square if present.
       const houseCost = sq.house || 0;
@@ -2161,13 +2261,13 @@ function mpRenderDeedInto(aside, sq) {
       ctrls.className = 'mp-deed-actions';
       const buildBtn = document.createElement('button');
       buildBtn.className = 'mp-cta mp-cta-primary';
-      buildBtn.textContent = houses === 4 ? `Отель · ${MP_CURRENCY}${houseCost}` : `Дом · ${MP_CURRENCY}${houseCost}`;
+      buildBtn.textContent = houses === 4 ? `Макс. влияние · ${MP_CURRENCY}${houseCost}` : `Влияние · ${MP_CURRENCY}${houseCost}`;
       buildBtn.disabled = !canBuild;
       buildBtn.onclick = () => send({ type: 'build-house', slug: sq.slug });
       ctrls.appendChild(buildBtn);
       const sellBtn = document.createElement('button');
       sellBtn.className = 'mp-cta mp-cta-secondary';
-      sellBtn.textContent = `Продать · +${MP_CURRENCY}${Math.floor(houseCost / 2)}`;
+      sellBtn.textContent = `Продать · +${MP_CURRENCY}${houseCost}`;
       sellBtn.disabled = !canSell;
       sellBtn.onclick = () => send({ type: 'sell-house', slug: sq.slug });
       ctrls.appendChild(sellBtn);
@@ -2211,7 +2311,7 @@ function mpRenderDeedInto(aside, sq) {
     const mySlot = state.mySlot;
     const ps = mySlot != null && state.slotState ? state.slotState[mySlot] : null;
     const isMine = ownerSlot != null && mySlot != null && ownerSlot === mySlot;
-    const isMortgaged = !!(state.mortgaged && state.mortgaged[sq.slug]);
+    const isMortgaged = mpIsMortgaged(sq.slug);
     if (isMine && state.mpPhase === 'playing' && ps && !ps.bankrupt) {
       const actions = document.createElement('div');
       actions.className = 'mp-deed-actions';
@@ -2230,7 +2330,7 @@ function mpRenderDeedInto(aside, sq) {
         btn.className = 'mp-cta mp-cta-secondary';
         btn.textContent = `Заложить · +${MP_CURRENCY}${value}`;
         btn.disabled = blockedByHouses;
-        btn.title = blockedByHouses ? 'Сначала продай постройки в группе' : '';
+        btn.title = blockedByHouses ? 'Сначала продай влияние в группе' : '';
         btn.onclick = () => send({ type: 'mortgage-property', slug: sq.slug });
         actions.appendChild(btn);
       }
@@ -2301,7 +2401,7 @@ function mpListOwned(slot) {
   return owned;
 }
 
-// True if any property in this property's group has houses on it.
+// True if any property in this property's group has influence on it.
 function mpGroupHasHouses(slug) {
   const sq = state.board.find((s) => s.slug === slug);
   if (!sq || sq.type !== 'property' || !sq.group) return false;
@@ -2472,7 +2572,7 @@ function mpBuildTradeColumn(title, ownerSlot, isMine) {
     const name = document.createElement('span');
     name.className = 'mp-trade-item-name';
     name.textContent = sq.name;
-    if (blocked) name.title = 'на группе есть постройки';
+    if (blocked) name.title = 'на группе есть влияние';
     item.appendChild(name);
     list.appendChild(item);
   }
@@ -2592,7 +2692,7 @@ function mpBuildTile(sq) {
     tile.dataset.ownerColor = '1';
     tile.style.setProperty('--mp-owner-color', mpSlotColor(ownerSlot));
   }
-  const isMortgaged = !!(sq.slug && state.mortgaged && state.mortgaged[sq.slug]);
+  const isMortgaged = mpIsMortgaged(sq.slug);
   if (isMortgaged) tile.classList.add('is-mortgaged');
 
   if (edge === 'corner') {
@@ -2674,11 +2774,12 @@ function mpBuildTile(sq) {
   if (isMortgaged) {
     const badge = document.createElement('div');
     badge.className = 'mp-tile-mortgage';
-    badge.textContent = 'ЗАЛОГ';
+    const left = mpMortgageTurnsLeft(sq.slug);
+    badge.textContent = left != null ? `ЗАЛОГ ${left}` : 'ЗАЛОГ';
     card.appendChild(badge);
   }
 
-  // Houses / hotel from current state
+  // Influence stars from current state
   const houseCount = sq.slug && state.houses ? (state.houses[sq.slug] || 0) : 0;
   if (houseCount > 0) {
     const houses = document.createElement('div');
@@ -2686,11 +2787,13 @@ function mpBuildTile(sq) {
     if (houseCount === 5) {
       const hotel = document.createElement('div');
       hotel.className = 'mp-tile-hotel';
+      hotel.textContent = '★';
       houses.appendChild(hotel);
     } else {
       for (let k = 0; k < houseCount; k++) {
         const h = document.createElement('div');
         h.className = 'mp-tile-house';
+        h.textContent = '★';
         houses.appendChild(h);
       }
     }
@@ -2774,7 +2877,9 @@ function mpUpdateTokens() {
     if (mpDisplayed[key] === undefined) {
       mpDisplayed[key] = ps.position;
     } else if (mpDisplayed[key] !== ps.position) {
-      if (mpDeferredWalkAfterDice && mpDeferredWalkAfterDice.key === key) {
+      if (mpAnimationPlaying && mpAnimationSlots.has(key)) {
+        // Queue player owns this movement.
+      } else if (mpDeferredWalkAfterDice && mpDeferredWalkAfterDice.key === key) {
         // Dice throw + tumble will finish, then mpStartWalk(deferred).
       } else {
         mpStartWalk(key, ps.position);
@@ -2907,6 +3012,7 @@ function mpFinishDiceRollSequence(deferred, d1, d2, myToken) {
 
 function mpUpdateDice() {
   if (!mpDiceContainer) return;
+  if (mpAnimationPlaying) return;
   const cur = state.dice;
   const prev = mpPrevDice;
   if (!cur) {

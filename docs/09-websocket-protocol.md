@@ -36,6 +36,8 @@
 
 `update-settings`, `start-game`, `roll-dice`, `buy-property`, `skip-buy`, `auction-bid`, `auction-pass`, `casino-bet`, `casino-skip`, `end-turn`, `pay-jail`, `pay-debt`, `build-house`, `sell-house`, `mortgage-property`, `unmortgage-property`, `trade-propose`, `trade-cancel`, `trade-respond`, `new-game`.
 
+Серверное состояние Монополии также отдаёт `animationSeq` / `animationEvents` для поэтапного проигрывания: кубики → перемещение → карточка → эффект карточки.
+
 ---
 
 Параметры полей (`index`, `count`, id игроков и т.д.) **не дублируются здесь** — смотри вызовы `send({...})` в **`public/app.js`** и проверки в **`handle*Msg` / `handleMonopolyMsg`** в **`server.js`**. При добавлении нового типа сообщения обнови эту таблицу.
