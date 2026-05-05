@@ -1797,7 +1797,7 @@ function createMonopolyGame(settings) {
   }
   return {
     phase: 'lobby',          // lobby | playing | finished
-    turn: null,              // rolling | jail-decision | action | ended
+    turn: null,              // rolling | jail-decision | action | auction | debt | ended
     maxSlots,
     turnOrder: [],           // array of slot indices (shuffled)
     turnIndex: 0,
@@ -1810,8 +1810,11 @@ function createMonopolyGame(settings) {
     slotState,               // slot index → state
     ownership: {},           // slug → slot index
     houses: {},              // slug → 0..5 (5 = hotel)
+    mortgaged: {},           // slug → true while property/transport/utility is pledged to the bank
     log: [],
     pendingBuy: null,
+    pendingAuction: null,   // { slug, type, name, currentBid, currentBidder, passed }
+    pendingDebt: null,      // { fromSlot, toSlot, amount, label } — player must raise cash or bankrupt
     pendingCasino: null,    // { slot, maxBet, name } — set when player lands on casino
     lastCasino: null,       // { slot, color, outcome, win, amount, ts } — for banner
     // Chance / Community-chest decks. Filled at startMonopolyGame.
@@ -1905,6 +1908,7 @@ function startMonopolyGame(room) {
   }
   game.ownership = {};
   game.houses = {};
+  game.mortgaged = {};
   game.activeTrade = null;
   game.chanceDeck = shuffle(MP_CHANCE_CARDS.map((c) => c.id));
   game.chanceDiscard = [];
@@ -1917,6 +1921,8 @@ function startMonopolyGame(room) {
   game.phase = 'playing';
   game.turn = 'rolling';
   game.pendingBuy = null;
+  game.pendingAuction = null;
+  game.pendingDebt = null;
   game.pendingCasino = null;
   game.lastCasino = null;
   game.winner = null;
@@ -1956,8 +1962,13 @@ function mpRollDice(room, slot) {
           ps.jailTurns = 0;
           mpLog(game, `${slotName} платит 50 за выход и двигается на ${d1 + d2}`);
           mpAdvance(room, slot, d1 + d2);
+        } else if (ps.money + mpLiquidationValue(game, slot) >= 50) {
+          game.pendingDebt = { fromSlot: slot, toSlot: null, amount: 50, label: 'выход из тюрьмы', after: { type: 'jail-release-move', steps: d1 + d2 } };
+          game.turn = 'debt';
+          mpLog(game, `${slotName} должен заплатить 50 за выход из тюрьмы. Нужно продать постройки или заложить активы.`);
         } else {
           mpLog(game, `${slotName} не может заплатить 50 — банкрот`);
+          mpLiquidateAll(room, slot);
           mpBankrupt(room, slot, null);
         }
       } else {
@@ -2032,13 +2043,14 @@ function mpResolveSquare(room, slot) {
     }
   }
 
-  if (game.phase === 'playing' && slot === game.currentSlot && !ps.bankrupt) {
+  if (game.phase === 'playing' && slot === game.currentSlot && !ps.bankrupt && !game.pendingDebt) {
     game.turn = 'action';
   }
 }
 
 function mpComputeRent(game, square, slug, ownerSlot) {
   const deck = game.deck;
+  if (game.mortgaged[slug]) return 0;
   if (square.type === 'property') {
     const prop = deck.properties[slug];
     const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
@@ -2124,12 +2136,13 @@ function mpApplyCardEffect(room, slot, card) {
   } else if (e.type === 'pay-each') {
     const others = game.turnOrder.filter((s) => s !== slot && !game.slotState[s].bankrupt);
     for (const other of others) {
-      if (game.slotState[slot].bankrupt) break;
+      if (game.slotState[slot].bankrupt || game.pendingDebt) break;
       mpCharge(room, slot, other, e.amount, card.text);
     }
   } else if (e.type === 'collect-each') {
     const others = game.turnOrder.filter((s) => s !== slot && !game.slotState[s].bankrupt);
     for (const other of others) {
+      if (game.pendingDebt) break;
       mpCharge(room, other, slot, e.amount, card.text);
     }
   }
@@ -2140,13 +2153,14 @@ function mpBuildHouse(room, slot, slug) {
   if (game.phase !== 'playing') return;
   if (slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
-  if (game.turn === 'jail-decision') return;
+  if (game.turn === 'jail-decision' || game.turn === 'debt' || game.pendingAuction) return;
   const deck = game.deck;
   const prop = deck.properties[slug];
   if (!prop) return;
   if (game.ownership[slug] !== slot) return;
   const groupSlugs = Object.keys(deck.properties).filter((s) => deck.properties[s].group === prop.group);
   if (!groupSlugs.every((s) => game.ownership[s] === slot)) return;
+  if (groupSlugs.some((s) => game.mortgaged[s])) return;
   const cur = game.houses[slug] || 0;
   if (cur >= 5) return;
   const minInGroup = Math.min(...groupSlugs.map((s) => game.houses[s] || 0));
@@ -2166,7 +2180,7 @@ function mpSellHouse(room, slot, slug) {
   if (game.phase !== 'playing') return;
   if (slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
-  if (game.turn === 'jail-decision') return;
+  if (game.turn === 'jail-decision' || game.pendingAuction) return;
   const deck = game.deck;
   const prop = deck.properties[slug];
   if (!prop) return;
@@ -2185,21 +2199,138 @@ function mpSellHouse(room, slot, slug) {
   mpLog(game, `${mpSlotName(room, slot)} продаёт постройку на «${prop.name}» (теперь ${what}), +${refund}`);
 }
 
+function mpSlugInfo(game, slug) {
+  const deck = game.deck;
+  if (deck.properties[slug]) return { type: 'property', info: deck.properties[slug] };
+  if (deck.transport[slug]) return { type: 'transport', info: deck.transport[slug] };
+  if (deck.utilities[slug]) return { type: 'utility', info: deck.utilities[slug] };
+  return null;
+}
+
+function mpMortgageValue(game, slug) {
+  const found = mpSlugInfo(game, slug);
+  return found ? Math.floor((found.info.price || 0) / 2) : 0;
+}
+
+function mpUnmortgageCost(game, slug) {
+  return Math.ceil(mpMortgageValue(game, slug) * 1.1);
+}
+
+function mpPropertyGroupSlugs(game, slug) {
+  const prop = game.deck.properties[slug];
+  if (!prop) return [];
+  return Object.keys(game.deck.properties).filter((s) => game.deck.properties[s].group === prop.group);
+}
+
+function mpGroupHasBuildings(game, slug) {
+  return mpPropertyGroupSlugs(game, slug).some((s) => (game.houses[s] || 0) > 0);
+}
+
+function mpLiquidationValue(game, slot) {
+  let total = 0;
+  for (const [slug, owner] of Object.entries(game.ownership)) {
+    if (owner !== slot) continue;
+    const found = mpSlugInfo(game, slug);
+    if (!found) continue;
+    if (found.type === 'property') {
+      total += (game.houses[slug] || 0) * Math.floor((found.info.house || 0) / 2);
+    }
+    if (!game.mortgaged[slug]) total += mpMortgageValue(game, slug);
+  }
+  return total;
+}
+
+function mpLiquidateAll(room, slot) {
+  const game = room.game;
+  const ps = game.slotState[slot];
+  let houseCash = 0;
+  let mortgageCash = 0;
+  for (const [slug, owner] of Object.entries(game.ownership)) {
+    if (owner !== slot) continue;
+    const found = mpSlugInfo(game, slug);
+    if (!found) continue;
+    if (found.type === 'property') {
+      const count = game.houses[slug] || 0;
+      if (count > 0) {
+        houseCash += count * Math.floor((found.info.house || 0) / 2);
+        delete game.houses[slug];
+      }
+    }
+  }
+  for (const [slug, owner] of Object.entries(game.ownership)) {
+    if (owner !== slot || game.mortgaged[slug]) continue;
+    const value = mpMortgageValue(game, slug);
+    if (value <= 0) continue;
+    game.mortgaged[slug] = true;
+    mortgageCash += value;
+  }
+  ps.money += houseCash + mortgageCash;
+  if (houseCash || mortgageCash) {
+    mpLog(game, `${mpSlotName(room, slot)} ликвидирует активы: постройки +${houseCash}, залог +${mortgageCash}`);
+  }
+}
+
+function mpMortgage(room, slot, slug) {
+  const game = room.game;
+  if (game.phase !== 'playing') return;
+  const ps = game.slotState[slot];
+  if (!ps || ps.bankrupt) return;
+  if (game.ownership[slug] !== slot) return;
+  if (game.mortgaged[slug]) return;
+  const found = mpSlugInfo(game, slug);
+  if (!found) return;
+  if (found.type === 'property' && mpGroupHasBuildings(game, slug)) return;
+  const value = mpMortgageValue(game, slug);
+  if (value <= 0) return;
+  game.mortgaged[slug] = true;
+  ps.money += value;
+  mpLog(game, `${mpSlotName(room, slot)} закладывает «${found.info.name}», +${value}`);
+}
+
+function mpUnmortgage(room, slot, slug) {
+  const game = room.game;
+  if (game.phase !== 'playing') return;
+  const ps = game.slotState[slot];
+  if (!ps || ps.bankrupt) return;
+  if (game.pendingDebt && game.pendingDebt.fromSlot === slot) return;
+  if (game.ownership[slug] !== slot || !game.mortgaged[slug]) return;
+  const found = mpSlugInfo(game, slug);
+  if (!found) return;
+  const cost = mpUnmortgageCost(game, slug);
+  if (ps.money < cost) return;
+  ps.money -= cost;
+  delete game.mortgaged[slug];
+  mpLog(game, `${mpSlotName(room, slot)} выкупает «${found.info.name}», −${cost}`);
+}
+
 function mpCharge(room, fromSlot, toSlot, amount, label) {
   const game = room.game;
   const ps = game.slotState[fromSlot];
   const fromName = mpSlotName(room, fromSlot);
   const toName = toSlot != null ? mpSlotName(room, toSlot) : 'банку';
+  if (!amount || amount <= 0) {
+    mpLog(game, `${fromName} ничего не платит за «${label}»`);
+    return 'paid';
+  }
   if (ps.money < amount) {
+    const canRaise = ps.money + mpLiquidationValue(game, fromSlot);
+    if (canRaise >= amount) {
+      game.pendingDebt = { fromSlot, toSlot, amount, label };
+      game.turn = 'debt';
+      mpLog(game, `${fromName} должен ${amount} (${label}) → ${toName}. Нужно продать постройки или заложить активы.`);
+      return 'debt';
+    }
+    mpLiquidateAll(room, fromSlot);
     const paid = ps.money;
     if (toSlot != null) game.slotState[toSlot].money += paid;
-    mpLog(game, `${fromName} не может заплатить ${amount} (${label}) — банкрот, ${toName} получает ${paid}`);
+    mpLog(game, `${fromName} не может покрыть долг ${amount} (${label}) даже после ликвидации — банкрот, ${toName} получает ${paid}`);
     mpBankrupt(room, fromSlot, toSlot);
-    return;
+    return 'bankrupt';
   }
   ps.money -= amount;
   if (toSlot != null) game.slotState[toSlot].money += amount;
   mpLog(game, `${fromName} платит ${amount} → ${toName} за «${label}»`);
+  return 'paid';
 }
 
 // ============================================================
@@ -2344,11 +2475,19 @@ function mpBankrupt(room, slot, creditorSlot) {
     if (game.ownership[slug] === slot) {
       if (game.houses[slug]) delete game.houses[slug];
       if (creditorSlot != null) game.ownership[slug] = creditorSlot;
-      else delete game.ownership[slug];
+      else {
+        delete game.ownership[slug];
+        delete game.mortgaged[slug];
+      }
     }
   }
   if (game.activeTrade && (game.activeTrade.fromSlot === slot || game.activeTrade.toSlot === slot)) {
     game.activeTrade = null;
+  }
+  if (game.pendingDebt && game.pendingDebt.fromSlot === slot) game.pendingDebt = null;
+  if (game.pendingAuction && game.pendingAuction.activeSlots.includes(slot)) {
+    game.pendingAuction.passed[slot] = true;
+    mpResolveAuction(room);
   }
   mpLog(game, `💀 ${mpSlotName(room, slot)} — БАНКРОТ`);
   mpCheckWin(room);
@@ -2362,6 +2501,8 @@ function mpAdvanceToNextPlayer(room) {
   game.doublesCount = 0;
   game.dice = null;
   game.pendingBuy = null;
+  game.pendingAuction = null;
+  game.pendingDebt = null;
   game.pendingCasino = null;
   const alive = game.turnOrder.filter((s) => !game.slotState[s].bankrupt);
   if (alive.length <= 1) { mpCheckWin(room); return; }
@@ -2397,32 +2538,123 @@ function mpBuy(room, slot) {
 function mpSkipBuy(room, slot) {
   const game = room.game;
   if (slot !== game.currentSlot || !game.pendingBuy) return;
-  mpLog(game, `${mpSlotName(room, slot)} отказывается от «${game.pendingBuy.name}»`);
+  const buy = game.pendingBuy;
+  mpLog(game, `${mpSlotName(room, slot)} отказывается от «${buy.name}» — начинается аукцион`);
   game.pendingBuy = null;
+  mpStartAuction(room, buy);
 }
 
-// Casino: red/white guess, win → +bet (2x payout), lose → -bet.
+function mpStartAuction(room, buy) {
+  const game = room.game;
+  const activeSlots = game.turnOrder.filter((s) => !game.slotState[s].bankrupt);
+  game.pendingAuction = {
+    slug: buy.slug,
+    type: buy.type,
+    name: buy.name,
+    price: buy.price,
+    currentBid: 0,
+    currentBidder: null,
+    passed: {},
+    activeSlots,
+  };
+  game.turn = 'auction';
+}
+
+function mpResolveAuction(room) {
+  const game = room.game;
+  const a = game.pendingAuction;
+  if (!a) return;
+  const contenders = a.activeSlots.filter((s) => !game.slotState[s].bankrupt && !a.passed[s]);
+  if (!a.currentBidder) {
+    if (contenders.length === 0) {
+      mpLog(game, `Аукцион за «${a.name}» завершён без ставок`);
+      game.pendingAuction = null;
+      game.turn = 'action';
+    }
+    return;
+  }
+  if (contenders.length === 1 && contenders[0] === a.currentBidder) {
+    const ps = game.slotState[a.currentBidder];
+    if (ps.money < a.currentBid) return;
+    ps.money -= a.currentBid;
+    game.ownership[a.slug] = a.currentBidder;
+    mpLog(game, `${mpSlotName(room, a.currentBidder)} выигрывает аукцион за «${a.name}» — ${a.currentBid}`);
+    game.pendingAuction = null;
+    game.turn = 'action';
+  }
+}
+
+function mpAuctionBid(room, slot, amount) {
+  const game = room.game;
+  const a = game.pendingAuction;
+  if (!a || game.phase !== 'playing') return;
+  if (!a.activeSlots.includes(slot) || a.passed[slot]) return;
+  const ps = game.slotState[slot];
+  if (!ps || ps.bankrupt) return;
+  const bid = Math.max(0, parseInt(amount, 10) || 0);
+  if (bid <= a.currentBid || bid > ps.money) return;
+  a.currentBid = bid;
+  a.currentBidder = slot;
+  mpLog(game, `${mpSlotName(room, slot)} ставит ${bid} за «${a.name}»`);
+  mpResolveAuction(room);
+}
+
+function mpAuctionPass(room, slot) {
+  const game = room.game;
+  const a = game.pendingAuction;
+  if (!a || game.phase !== 'playing') return;
+  if (!a.activeSlots.includes(slot) || a.currentBidder === slot) return;
+  a.passed[slot] = true;
+  mpLog(game, `${mpSlotName(room, slot)} пасует на аукционе за «${a.name}»`);
+  mpResolveAuction(room);
+}
+
+function mpPayDebt(room, slot) {
+  const game = room.game;
+  const debt = game.pendingDebt;
+  if (!debt || debt.fromSlot !== slot) return;
+  const ps = game.slotState[slot];
+  if (!ps || ps.bankrupt) return;
+  if (ps.money < debt.amount) return;
+  const toName = debt.toSlot != null ? mpSlotName(room, debt.toSlot) : 'банку';
+  ps.money -= debt.amount;
+  if (debt.toSlot != null) game.slotState[debt.toSlot].money += debt.amount;
+  mpLog(game, `${mpSlotName(room, slot)} закрывает долг ${debt.amount} → ${toName} за «${debt.label}»`);
+  game.pendingDebt = null;
+  if (debt.after && debt.after.type === 'jail-release-move') {
+    ps.inJail = false;
+    ps.jailTurns = 0;
+    mpAdvance(room, slot, debt.after.steps || 0);
+    return;
+  }
+  game.turn = 'action';
+}
+
+// Casino: red/black guess, win → +bet (2x payout), lose → -bet.
 // Bet capped at floor(money/2). Player may also skip without playing.
 function mpCasinoBet(room, slot, color, amount) {
   const game = room.game;
   if (game.phase !== 'playing' || slot !== game.currentSlot) return;
   const pc = game.pendingCasino;
   if (!pc || pc.slot !== slot) return;
-  if (color !== 'red' && color !== 'white') return;
+  if (color === 'white') color = 'black'; // Backward compatibility for already-open tabs.
+  if (color !== 'red' && color !== 'black') return;
   const bet = parseInt(amount, 10);
   if (!Number.isFinite(bet) || bet < 1) return;
   const ps = game.slotState[slot];
   const maxBet = Math.floor(ps.money / 2);
   if (bet > maxBet) return;
-  const outcome = Math.random() < 0.5 ? 'red' : 'white';
+  const outcome = Math.random() < 0.5 ? 'red' : 'black';
   const won = outcome === color;
   const slotName = mpSlotName(room, slot);
+  const colorName = color === 'red' ? 'красное' : 'чёрное';
+  const outcomeName = outcome === 'red' ? 'красное' : 'чёрное';
   if (won) {
     ps.money += bet;
-    mpLog(game, `🎲 ${slotName} ставит ${bet} на ${color === 'red' ? 'красное' : 'белое'} — выпало ${outcome === 'red' ? 'красное' : 'белое'}, выигрыш +${bet}`);
+    mpLog(game, `🎲 ${slotName} ставит ${bet} на ${colorName} — выпало ${outcomeName}, выигрыш +${bet}`);
   } else {
     ps.money -= bet;
-    mpLog(game, `🎲 ${slotName} ставит ${bet} на ${color === 'red' ? 'красное' : 'белое'} — выпало ${outcome === 'red' ? 'красное' : 'белое'}, проигрыш −${bet}`);
+    mpLog(game, `🎲 ${slotName} ставит ${bet} на ${colorName} — выпало ${outcomeName}, проигрыш −${bet}`);
   }
   game.lastCasino = { slot, color, outcome, win: won, amount: bet, ts: Date.now() };
   game.pendingCasino = null;
@@ -2439,6 +2671,7 @@ function mpEndTurn(room, slot) {
   const game = room.game;
   if (game.phase !== 'playing' || slot !== game.currentSlot) return;
   if (game.pendingBuy) return;
+  if (game.pendingAuction || game.pendingDebt) return;
   if (game.pendingCasino) return;
   const ps = game.slotState[slot];
   const rolledDouble = game.dice && game.dice[0] === game.dice[1] && game.doublesCount > 0 && game.doublesCount < 3;
@@ -2548,7 +2781,10 @@ function getMonopolyState(room, playerId) {
     slotState: game.slotState,
     ownership: game.ownership,
     houses: game.houses,
+    mortgaged: game.mortgaged,
     pendingBuy: isCurrent ? game.pendingBuy : null,
+    pendingAuction: game.pendingAuction,
+    pendingDebt: game.pendingDebt,
     pendingCasino: isCurrent ? game.pendingCasino : null,
     activeTrade: tradeView,
     lastCard: game.lastCard,
@@ -2615,6 +2851,36 @@ function handleMonopolyMsg(room, playerId, msg) {
 
   if (msg.type === 'skip-buy') {
     if (slot != null) mpSkipBuy(room, slot);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'auction-bid') {
+    if (slot != null) mpAuctionBid(room, slot, msg.amount);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'auction-pass') {
+    if (slot != null) mpAuctionPass(room, slot);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'pay-debt') {
+    if (slot != null) mpPayDebt(room, slot);
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'mortgage-property') {
+    if (slot != null) mpMortgage(room, slot, String(msg.slug || ''));
+    broadcastRoom(room);
+    return;
+  }
+
+  if (msg.type === 'unmortgage-property') {
+    if (slot != null) mpUnmortgage(room, slot, String(msg.slug || ''));
     broadcastRoom(room);
     return;
   }

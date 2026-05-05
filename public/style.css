@@ -62,7 +62,8 @@ body {
 #btn-join { background: #3498db; color: #fff; }
 .divider { color: #666; font-size: 14px; }
 .error { color: #e74c3c; font-size: 14px; }
-.mode-select {
+.mode-select,
+.theme-select {
   padding: 12px 16px;
   border: 2px solid #333;
   border-radius: 8px;
@@ -73,7 +74,8 @@ body {
   cursor: pointer;
   width: 100%;
 }
-.mode-select:focus { outline: none; border-color: #3498db; }
+.mode-select:focus,
+.theme-select:focus { outline: none; border-color: #3498db; }
 
 .game-mode-badge {
   font-size: 11px;
@@ -1379,6 +1381,194 @@ button.sf-location-card:hover {
   text-align: center;
 }
 
+/* ========== Local paper theme (non-Monopoly games) ========== */
+body.theme-paper {
+  background: #ebe4d4;
+  color: #2a2418;
+}
+body.theme-paper .overlay {
+  background: #ebe4d4;
+  color: #2a2418;
+}
+body.theme-paper .join-box h1 {
+  background: none;
+  -webkit-text-fill-color: #2a2418;
+  color: #2a2418;
+  font-family: "Instrument Serif", ui-serif, Georgia, serif;
+  font-style: italic;
+  letter-spacing: -1px;
+  text-transform: none;
+}
+body.theme-paper .join-box input,
+body.theme-paper .mode-select,
+body.theme-paper .theme-select {
+  background: #fbf6e8;
+  color: #2a2418;
+  border-color: rgba(42, 36, 24, 0.22);
+  box-shadow: 0 2px 8px rgba(42, 36, 24, 0.04);
+}
+body.theme-paper .join-box input:focus,
+body.theme-paper .mode-select:focus,
+body.theme-paper .theme-select:focus {
+  border-color: #b85c3e;
+}
+body.theme-paper .divider,
+body.theme-paper .version {
+  color: #8a7f65;
+}
+body.theme-paper #btn-create {
+  background: #2a2418;
+  color: #fbf6e8;
+}
+body.theme-paper #btn-join {
+  background: #b85c3e;
+  color: #fbf6e8;
+}
+
+body.theme-paper:not(.gm-monopoly) .game-screen {
+  color: #2a2418;
+}
+body.theme-paper:not(.gm-monopoly) .top-bar {
+  border-bottom-color: rgba(42, 36, 24, 0.18);
+}
+body.theme-paper:not(.gm-monopoly) .room-label,
+body.theme-paper:not(.gm-monopoly) .alias-explainer-label,
+body.theme-paper:not(.gm-monopoly) .sf-ask-label,
+body.theme-paper:not(.gm-monopoly) .sf-vote-status,
+body.theme-paper:not(.gm-monopoly) .sf-lobby-msg,
+body.theme-paper:not(.gm-monopoly) .wm-notebook h4,
+body.theme-paper:not(.gm-monopoly) .croc-guess-item .guess-name {
+  color: #8a7f65;
+}
+body.theme-paper:not(.gm-monopoly) .room-code,
+body.theme-paper:not(.gm-monopoly) .timer-display,
+body.theme-paper:not(.gm-monopoly) .settings-dropdown,
+body.theme-paper:not(.gm-monopoly) .alias-word-card,
+body.theme-paper:not(.gm-monopoly) .alias-waiting-card,
+body.theme-paper:not(.gm-monopoly) .sf-result-section,
+body.theme-paper:not(.gm-monopoly) .wm-player-card,
+body.theme-paper:not(.gm-monopoly) .croc-waiting-card {
+  background: #fbf6e8;
+  color: #2a2418;
+  border: 0.5px solid rgba(42, 36, 24, 0.18);
+  box-shadow: 0 4px 14px rgba(42, 36, 24, 0.05);
+}
+body.theme-paper:not(.gm-monopoly) .settings-dropdown {
+  border-width: 0.5px;
+}
+body.theme-paper:not(.gm-monopoly) .settings-dropdown select,
+body.theme-paper:not(.gm-monopoly) .name-editor input,
+body.theme-paper:not(.gm-monopoly) .clue-form input,
+body.theme-paper:not(.gm-monopoly) .wm-assign-input,
+body.theme-paper:not(.gm-monopoly) .wm-guess-input,
+body.theme-paper:not(.gm-monopoly) .wm-notebook textarea,
+body.theme-paper:not(.gm-monopoly) .croc-guess-input {
+  background: #fffaf1;
+  color: #2a2418;
+  border-color: rgba(42, 36, 24, 0.22);
+}
+body.theme-paper:not(.gm-monopoly) .btn-action,
+body.theme-paper:not(.gm-monopoly) .team-actions button,
+body.theme-paper:not(.gm-monopoly) .spectators-block .btn-spectate,
+body.theme-paper:not(.gm-monopoly) .croc-tool-btn,
+body.theme-paper:not(.gm-monopoly) .sf-accuse-list button {
+  background: #fbf6e8;
+  color: #2a2418;
+  border: 0.5px solid rgba(42, 36, 24, 0.22);
+}
+body.theme-paper:not(.gm-monopoly) .btn-action:hover,
+body.theme-paper:not(.gm-monopoly) .team-actions button:hover,
+body.theme-paper:not(.gm-monopoly) .spectators-block .btn-spectate:hover,
+body.theme-paper:not(.gm-monopoly) .croc-tool-btn:hover,
+body.theme-paper:not(.gm-monopoly) .sf-accuse-list button:hover {
+  background: #fff;
+}
+body.theme-paper:not(.gm-monopoly) .player-panel {
+  border-top-color: rgba(42, 36, 24, 0.18);
+}
+body.theme-paper:not(.gm-monopoly) .player-team-block,
+body.theme-paper:not(.gm-monopoly) .spectators-block {
+  background: rgba(251, 246, 232, 0.72);
+  border-color: rgba(42, 36, 24, 0.18);
+}
+body.theme-paper:not(.gm-monopoly) .spectator-entry {
+  color: #5b523f;
+}
+body.theme-paper:not(.gm-monopoly) .card.unrevealed {
+  background: #fbf6e8;
+  color: #2a2418;
+  border: 0.5px solid rgba(42, 36, 24, 0.22);
+  box-shadow: 0 3px 10px rgba(42, 36, 24, 0.05);
+}
+body.theme-paper:not(.gm-monopoly) .card.clickable:hover {
+  box-shadow: 0 5px 16px rgba(42, 36, 24, 0.16);
+  outline-color: rgba(184, 92, 62, 0.45);
+}
+body.theme-paper:not(.gm-monopoly) .card.spy-red { color: #8b2d24; background: rgba(192, 57, 43, 0.16); }
+body.theme-paper:not(.gm-monopoly) .card.spy-blue { color: #235d85; background: rgba(41, 128, 185, 0.16); }
+body.theme-paper:not(.gm-monopoly) .card.spy-green { color: #226f43; background: rgba(39, 174, 96, 0.16); }
+body.theme-paper:not(.gm-monopoly) .card.spy-orange { color: #8b4d13; background: rgba(211, 84, 0, 0.16); }
+body.theme-paper:not(.gm-monopoly) .card.spy-purple { color: #67347d; background: rgba(142, 68, 173, 0.16); }
+body.theme-paper:not(.gm-monopoly) .card.spy-neutral { color: #5f686b; background: rgba(99, 110, 114, 0.14); }
+body.theme-paper:not(.gm-monopoly) .clue-entry {
+  border-bottom-color: rgba(42, 36, 24, 0.08);
+}
+body.theme-paper:not(.gm-monopoly) .alias-review-correct {
+  background: rgba(39, 174, 96, 0.12);
+  color: #1f7a45;
+}
+body.theme-paper:not(.gm-monopoly) .alias-review-skipped {
+  background: rgba(231, 76, 60, 0.12);
+  color: #a93b2e;
+}
+body.theme-paper:not(.gm-monopoly) .spyfall-role-card.sf-player,
+body.theme-paper:not(.gm-monopoly) .spyfall-role-card.sf-spy {
+  background: #fbf6e8;
+  box-shadow: 0 4px 14px rgba(42, 36, 24, 0.05);
+}
+body.theme-paper:not(.gm-monopoly) .spyfall-role-card .sf-role,
+body.theme-paper:not(.gm-monopoly) .wm-word-tablet.wm-hidden,
+body.theme-paper:not(.gm-monopoly) .wm-word-tablet.wm-you {
+  color: #8a7f65;
+}
+body.theme-paper:not(.gm-monopoly) .sf-location-card {
+  background: #fbf6e8;
+  border-color: rgba(42, 36, 24, 0.18);
+  color: #2a2418;
+}
+body.theme-paper:not(.gm-monopoly) .sf-location-card img {
+  background: #f4eede;
+}
+body.theme-paper:not(.gm-monopoly) .sf-location-active {
+  background: rgba(39, 174, 96, 0.12);
+}
+body.theme-paper:not(.gm-monopoly) .wm-word-tablet {
+  background: #fffaf1;
+  color: #8a5b00;
+}
+body.theme-paper:not(.gm-monopoly) .croc-canvas-wrap {
+  border-color: rgba(42, 36, 24, 0.22);
+  box-shadow: 0 4px 14px rgba(42, 36, 24, 0.06);
+}
+body.theme-paper:not(.gm-monopoly) .croc-color.active {
+  border-color: #2a2418;
+}
+body.theme-paper:not(.gm-monopoly) .croc-color:hover {
+  border-color: rgba(42, 36, 24, 0.45);
+}
+body.theme-paper:not(.gm-monopoly) .pause-overlay {
+  background: rgba(235, 228, 212, 0.92);
+  color: #2a2418;
+}
+body.theme-paper:not(.gm-monopoly) .pause-text {
+  color: #b85c3e;
+  font-family: "Instrument Serif", ui-serif, Georgia, serif;
+}
+body.theme-paper:not(.gm-monopoly) .winner-overlay {
+  background: rgba(235, 228, 212, 0.95);
+  box-shadow: 0 4px 30px rgba(42, 36, 24, 0.2);
+}
+
 /* ========== Responsive ========== */
 @media (max-width: 800px) {
   .clue-sidebar { display: none; }
@@ -1628,6 +1818,27 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 .mp-tile[data-owner-color] .mp-tile-card::before {
   border-color: var(--mp-owner-color);
 }
+.mp-tile.is-mortgaged .mp-tile-card {
+  filter: grayscale(0.7);
+}
+.mp-tile.is-mortgaged .mp-tile-glyph {
+  opacity: 0.42;
+}
+.mp-tile-mortgage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  padding: 2px 5px;
+  border: 1px solid var(--mp-accent);
+  color: var(--mp-accent);
+  background: rgba(251, 246, 232, 0.86);
+  font-family: var(--mp-mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  pointer-events: none;
+}
 
 /* Glyph / logo inside the card */
 .mp-tile-glyph {
@@ -1828,6 +2039,19 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   letter-spacing: 3px;
   margin-top: 8px;
   text-align: center;
+}
+.mp-dice-throw-layer {
+  position: absolute;
+  left: var(--mp-corner-size);
+  top: var(--mp-corner-size);
+  width: calc(var(--mp-cell-size) * 9);
+  height: calc(var(--mp-cell-size) * 9);
+  pointer-events: none;
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 720px;
 }
 
 /* Dice */
@@ -2054,6 +2278,7 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   gap: 14px;
   padding: 16px 12px;
   min-width: 0;
+  overflow: visible; /* dice throw above action bar */
 }
 
 .mp-aside-h {
@@ -2302,6 +2527,7 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   max-width: 600px;
   width: 100%;
   box-sizing: border-box;
+  overflow: visible; /* dice throw arc may extend above the bar */
 }
 .mp-action-status {
   display: flex;
@@ -2326,7 +2552,133 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   letter-spacing: -0.3px;
   line-height: 1.1;
 }
-.mp-action-dice { display: flex; gap: 8px; }
+.mp-action-dice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  overflow: visible;
+  min-height: 52px;
+}
+.mp-dice-pair {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  transform-origin: 50% 100%;
+  will-change: transform;
+}
+/* Dice are thrown onto the board; the action bar only updates after settle. */
+@keyframes mp-dice-pair-table-throw {
+  0% {
+    transform: translate3d(18vmin, 25vmin, 0) rotateZ(-28deg) scale(0.62);
+    opacity: 0;
+  }
+  26% {
+    transform: translate3d(-3vmin, -4vmin, 0) rotateZ(13deg) scale(1.12);
+    opacity: 1;
+  }
+  48% {
+    transform: translate3d(2.4vmin, 1.8vmin, 0) rotateZ(-7deg) scale(0.98);
+  }
+  72% {
+    transform: translate3d(-0.8vmin, 0.7vmin, 0) rotateZ(3deg) scale(1.02);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotateZ(0deg) scale(1);
+    opacity: 1;
+  }
+}
+.mp-dice-throw-layer .mp-dice-pair {
+  filter: drop-shadow(0 14px 18px rgba(42, 36, 24, 0.24));
+}
+.mp-dice-pair.mp-dice-pair--table-throw {
+  animation: mp-dice-pair-table-throw 1.24s cubic-bezier(0.2, 0.9, 0.18, 1) forwards;
+}
+.mp-dice-pair.mp-dice-pair--table-tumble {
+  animation: mp-dice-pair-table-tumble 1.05s cubic-bezier(0.2, 0.8, 0.24, 1) forwards;
+}
+.mp-dice-pair.mp-dice-pair--table-final {
+  animation: mp-dice-table-final 360ms ease-out both;
+}
+@keyframes mp-dice-pair-table-tumble {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  35% { transform: translate3d(-1.8vmin, 1.1vmin, 0) scale(1.04); }
+  68% { transform: translate3d(1vmin, 0.4vmin, 0) scale(0.98); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes mp-dice-table-final {
+  0% { transform: translateY(-4px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+.mp-dice-pair--table {
+  gap: clamp(10px, 1.8vmin, 18px);
+  transform-style: preserve-3d;
+}
+.mp-die-cube {
+  --mp-die-cube-size: clamp(44px, 6.4vmin, 66px);
+  width: var(--mp-die-cube-size);
+  height: var(--mp-die-cube-size);
+  position: relative;
+  transform-style: preserve-3d;
+}
+.mp-die-cube-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateX(-14deg) rotateY(18deg) rotateZ(0deg);
+}
+.mp-die-cube-face {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(145deg, #fffaf1, #f5ead7);
+  border: 1px solid rgba(42, 36, 24, 0.32);
+  border-radius: 14%;
+  box-shadow: inset -5px -6px 12px rgba(42, 36, 24, 0.12), inset 4px 4px 10px rgba(255, 255, 255, 0.85);
+  backface-visibility: hidden;
+}
+.mp-die-cube-face-front { transform: translateZ(calc(var(--mp-die-cube-size) / 2)); }
+.mp-die-cube-face-back { transform: rotateY(180deg) translateZ(calc(var(--mp-die-cube-size) / 2)); }
+.mp-die-cube-face-right { transform: rotateY(90deg) translateZ(calc(var(--mp-die-cube-size) / 2)); }
+.mp-die-cube-face-left { transform: rotateY(-90deg) translateZ(calc(var(--mp-die-cube-size) / 2)); }
+.mp-die-cube-face-top { transform: rotateX(90deg) translateZ(calc(var(--mp-die-cube-size) / 2)); }
+.mp-die-cube-face-bottom { transform: rotateX(-90deg) translateZ(calc(var(--mp-die-cube-size) / 2)); }
+.mp-die-cube-dot {
+  position: absolute;
+  width: 12%;
+  height: 12%;
+  border-radius: 999px;
+  background: var(--mp-ink);
+  transform: translate(-50%, -50%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.18);
+}
+.mp-dice-pair--table-throw .mp-die-cube-a .mp-die-cube-inner {
+  animation: mp-die-cube-roll-a 1.24s cubic-bezier(0.2, 0.9, 0.18, 1) both;
+}
+.mp-dice-pair--table-throw .mp-die-cube-b .mp-die-cube-inner {
+  animation: mp-die-cube-roll-b 1.24s cubic-bezier(0.2, 0.9, 0.18, 1) both;
+}
+.mp-dice-pair--table-tumble .mp-die-cube-a .mp-die-cube-inner {
+  animation: mp-die-cube-tumble-a 1.05s cubic-bezier(0.2, 0.8, 0.24, 1) both;
+}
+.mp-dice-pair--table-tumble .mp-die-cube-b .mp-die-cube-inner {
+  animation: mp-die-cube-tumble-b 1.05s cubic-bezier(0.2, 0.8, 0.24, 1) both;
+}
+@keyframes mp-die-cube-roll-a {
+  0% { transform: rotateX(720deg) rotateY(-520deg) rotateZ(28deg); }
+  100% { transform: rotateX(-14deg) rotateY(18deg) rotateZ(0deg); }
+}
+@keyframes mp-die-cube-roll-b {
+  0% { transform: rotateX(-650deg) rotateY(700deg) rotateZ(-34deg); }
+  100% { transform: rotateX(-14deg) rotateY(18deg) rotateZ(0deg); }
+}
+@keyframes mp-die-cube-tumble-a {
+  0% { transform: rotateX(620deg) rotateY(-430deg) rotateZ(20deg); }
+  100% { transform: rotateX(-14deg) rotateY(18deg) rotateZ(0deg); }
+}
+@keyframes mp-die-cube-tumble-b {
+  0% { transform: rotateX(-560deg) rotateY(520deg) rotateZ(-18deg); }
+  100% { transform: rotateX(-14deg) rotateY(18deg) rotateZ(0deg); }
+}
 .mp-action-btns { display: flex; gap: 8px; }
 
 /* Dot dice */
@@ -2345,10 +2697,10 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
 
 @keyframes mp-die-jitter-a { 0% { transform: rotate(-8deg) translateY(-1px); } 50% { transform: rotate(6deg) translateY(1px); } 100% { transform: rotate(-4deg) translateY(0); } }
 @keyframes mp-die-jitter-b { 0% { transform: rotate(7deg) translateY(1px); } 50% { transform: rotate(-5deg) translateY(-1px); } 100% { transform: rotate(3deg) translateY(0); } }
-.mp-action-dice.is-rolling .mp-die-svg:nth-child(1) {
+.mp-action-dice.is-rolling .mp-dice-pair > .mp-die-svg:nth-child(1) {
   animation: mp-die-jitter-a 200ms ease-in-out infinite;
 }
-.mp-action-dice.is-rolling .mp-die-svg:nth-child(2) {
+.mp-action-dice.is-rolling .mp-dice-pair > .mp-die-svg:nth-child(2) {
   animation: mp-die-jitter-b 240ms ease-in-out infinite;
 }
 
@@ -2422,12 +2774,12 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   border-color: #c53030;
 }
 .mp-casino-red:hover:not(:disabled) { background: #a82525; }
-.mp-casino-white {
-  background: #f5f1e6;
-  color: var(--mp-ink);
-  border: 1px solid var(--mp-ink);
+.mp-casino-black {
+  background: #171717;
+  color: #fff;
+  border: 1px solid #171717;
 }
-.mp-casino-white:hover:not(:disabled) { background: #ffffff; }
+.mp-casino-black:hover:not(:disabled) { background: #000; }
 
 /* Tile selection ring */
 .mp-tile.is-selected .mp-tile-card { box-shadow: 0 0 0 2px var(--mp-accent); }

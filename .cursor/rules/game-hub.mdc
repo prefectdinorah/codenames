@@ -1,0 +1,29 @@
+---
+description: Codenames hub — server/game modes and WebSocket patterns
+alwaysApply: true
+---
+
+# Party games monolith
+
+- **Stack:** Node.js, Express (static + REST admin for Monopoly decks/logos), `ws` on same HTTP server. Main client: vanilla JS in `public/app.js` + `public/index.html`.
+- **Rooms:** `rooms` Map → `{ code, hostId, gameMode, players, settings, game }`. State updates via `broadcastRoom(room)` → per-player `getPlayerState(room, playerId)`.
+- **Adding or changing a game mode:** extend `createRoom` / `create*Game`, `get*State`, `resumeTimerFor` / pause paths if timed, WebSocket branch in `connection` handler, and mirror UI in `public/index.html` + `public/app.js` (areas, settings panel, badge in `render()`).
+
+## Monopoly
+
+- Data: `monopoly-data.js` (tiles/rules seed), persistence/editor: `monopoly-store.js`, optional S3 via env from `.env.example`.
+- Admin UI: `public/admin.js` (separate concerns from main `app.js` where reasonable).
+
+## Conventions
+
+- Preserve **Russian** copy in UI and user-facing server errors unless explicitly translating.
+- Prefer **small, focused diffs**; avoid drive-by refactors in unrelated game modes.
+- **Secrets:** never commit `.env`; document new vars in `.env.example` only.
+
+## Deploy
+
+- Docker: `Dockerfile`, `docker-compose.yml`. Prod may `git pull` on host — keep `main` deployable.
+
+## Docs
+
+- Human + agent onboarding: root **`AGENTS.md`**, full **`docs/`** (Markdown). Update docs when behavior or env contract changes.
