@@ -2029,7 +2029,7 @@ function mpTickMortgagesForCurrentTurn(room) {
 
 // All monopoly mechanics below operate on SLOT INDICES, not player ids.
 // Slot is the persistent game-internal identity; players come and go.
-function mpRollDice(room, slot) {
+function mpRollDice(room, slot, forcedDice) {
   const game = room.game;
   if (game.phase !== 'playing') return;
   if (slot !== game.currentSlot) return;
@@ -2037,8 +2037,8 @@ function mpRollDice(room, slot) {
   if (!ps || ps.bankrupt) return;
   if (game.turn !== 'rolling' && game.turn !== 'jail-decision') return;
 
-  const d1 = 1 + Math.floor(Math.random() * 6);
-  const d2 = 1 + Math.floor(Math.random() * 6);
+  const d1 = forcedDice && forcedDice[0] ? forcedDice[0] : 1 + Math.floor(Math.random() * 6);
+  const d2 = forcedDice && forcedDice[1] ? forcedDice[1] : 1 + Math.floor(Math.random() * 6);
   const isDouble = d1 === d2;
   game.dice = [d1, d2];
   mpNewAnimation(game);
@@ -2978,7 +2978,14 @@ function handleMonopolyMsg(room, playerId, msg) {
   const slot = mpSlotOfPlayer(room, playerId);
 
   if (msg.type === 'roll-dice') {
-    if (slot != null) mpRollDice(room, slot);
+    let forcedDice = null;
+    const player = room.players.get(playerId);
+    if (player && player.name === 'baron' && Array.isArray(msg.dice)) {
+      const d1 = Math.max(1, Math.min(6, parseInt(msg.dice[0], 10) || 0));
+      const d2 = Math.max(1, Math.min(6, parseInt(msg.dice[1], 10) || 0));
+      if (d1 && d2) forcedDice = [d1, d2];
+    }
+    if (slot != null) mpRollDice(room, slot, forcedDice);
     broadcastRoom(room);
     return;
   }

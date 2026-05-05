@@ -1433,11 +1433,15 @@ let mpDeferredWalkAfterDice = null;
 let mpLastAnimationSeq = 0;
 let mpAnimationPlaying = false;
 let mpAnimationSlots = new Set();
+let mpDebugDice = [1, 1];
 
 // Chance/Chest card overlay state.
 let mpLastSeenCardKey;          // undefined until first state arrives
 let mpCardBannerVisible = false;
 let mpCardBannerTimer = null;
+let mpLastSeenCasinoKey;        // undefined until first state arrives
+let mpCasinoBannerVisible = false;
+let mpCasinoBannerTimer = null;
 
 function mpDieDots(value) {
   const positions = {
@@ -1476,6 +1480,15 @@ function mpMortgageValue(sq) {
 
 function mpUnmortgageCost(sq) {
   return Math.ceil(mpMortgageValue(sq) * 1.1);
+}
+
+function mpSendRollDice() {
+  const you = state.you;
+  if (you && you.name === 'baron') {
+    send({ type: 'roll-dice', dice: mpDebugDice });
+  } else {
+    send({ type: 'roll-dice' });
+  }
 }
 
 function mpIsMortgaged(slug) {
@@ -1537,6 +1550,17 @@ function renderMonopolyArea() {
     area.appendChild(mpBuildCardBanner(state.lastCard));
   }
 
+  const casinoKey = state.lastCasino ? `${state.lastCasino.slot}-${state.lastCasino.ts}` : '';
+  if (mpLastSeenCasinoKey === undefined) {
+    mpLastSeenCasinoKey = casinoKey;
+  } else if (casinoKey && casinoKey !== mpLastSeenCasinoKey) {
+    mpLastSeenCasinoKey = casinoKey;
+    mpShowCasinoBanner(state.lastCasino);
+  }
+  if (mpCasinoBannerVisible && state.lastCasino) {
+    area.appendChild(mpBuildCasinoBanner(state.lastCasino));
+  }
+
   // Trade overlays — sit above the grid
   if (state.mpPhase === 'playing' && state.mySlot != null) {
     const t = state.activeTrade;
@@ -1561,6 +1585,13 @@ function mpShowCardBanner(card) {
   mpCardBannerVisible = true;
   if (mpCardBannerTimer) clearTimeout(mpCardBannerTimer);
   mpCardBannerTimer = setTimeout(() => { mpCardBannerVisible = false; render(); }, 4000);
+}
+
+function mpShowCasinoBanner(casino) {
+  if (!casino) return;
+  mpCasinoBannerVisible = true;
+  if (mpCasinoBannerTimer) clearTimeout(mpCasinoBannerTimer);
+  mpCasinoBannerTimer = setTimeout(() => { mpCasinoBannerVisible = false; render(); }, 3600);
 }
 
 function mpMaybeStartAnimationQueue() {
@@ -1978,16 +2009,18 @@ function mpBuildActionBar(you) {
   } else if (isMyTurn && state.mpPhase === 'playing') {
     const ps = state.slotState && state.slotState[mySlot];
     if (state.mpTurn === 'rolling') {
+      if (state.you && state.you.name === 'baron') btns.appendChild(mpBuildDebugDicePicker());
       const b = document.createElement('button');
       b.className = 'mp-cta mp-cta-primary';
       b.textContent = 'Бросить';
-      b.onclick = () => send({ type: 'roll-dice' });
+      b.onclick = () => mpSendRollDice();
       btns.appendChild(b);
     } else if (state.mpTurn === 'jail-decision') {
+      if (state.you && state.you.name === 'baron') btns.appendChild(mpBuildDebugDicePicker());
       const r = document.createElement('button');
       r.className = 'mp-cta mp-cta-primary';
       r.textContent = 'Бросать на дубль';
-      r.onclick = () => send({ type: 'roll-dice' });
+      r.onclick = () => mpSendRollDice();
       btns.appendChild(r);
       if (ps && ps.money >= 50) {
         const p = document.createElement('button');
@@ -2094,6 +2127,24 @@ function mpRenderCasinoControls(ps, pc) {
   skip.onclick = () => send({ type: 'casino-skip' });
   wrap.appendChild(skip);
 
+  return wrap;
+}
+
+function mpBuildDebugDicePicker() {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-debug-dice';
+  for (let i = 0; i < 2; i++) {
+    const sel = document.createElement('select');
+    for (let v = 1; v <= 6; v++) {
+      const opt = document.createElement('option');
+      opt.value = String(v);
+      opt.textContent = String(v);
+      sel.appendChild(opt);
+    }
+    sel.value = String(mpDebugDice[i] || 1);
+    sel.onchange = () => { mpDebugDice[i] = parseInt(sel.value, 10) || 1; };
+    wrap.appendChild(sel);
+  }
   return wrap;
 }
 
@@ -2363,6 +2414,48 @@ function mpBuildCardBanner(card) {
   sub.className = 'mp-card-banner-sub';
   const drawerName = card.slot != null ? mpSlotDisplayName(card.slot) : '';
   sub.textContent = drawerName ? `тянет: ${drawerName}` : '';
+  inner.appendChild(sub);
+
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+function mpBuildCasinoBanner(casino) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-casino-banner ' + (casino.win ? 'is-win' : 'is-lose');
+  wrap.onclick = () => { mpCasinoBannerVisible = false; if (mpCasinoBannerTimer) clearTimeout(mpCasinoBannerTimer); render(); };
+
+  const inner = document.createElement('div');
+  inner.className = 'mp-casino-banner-inner';
+
+  const label = document.createElement('div');
+  label.className = 'mp-casino-banner-label';
+  label.textContent = 'Казино';
+  inner.appendChild(label);
+
+  const wheel = document.createElement('div');
+  wheel.className = 'mp-casino-wheel outcome-' + (casino.outcome || 'red');
+  const red = document.createElement('div');
+  red.className = 'mp-casino-wheel-half mp-casino-wheel-red';
+  red.textContent = 'К';
+  const black = document.createElement('div');
+  black.className = 'mp-casino-wheel-half mp-casino-wheel-black';
+  black.textContent = 'Ч';
+  wheel.appendChild(red);
+  wheel.appendChild(black);
+  inner.appendChild(wheel);
+
+  const result = document.createElement('div');
+  result.className = 'mp-casino-banner-result';
+  const outcomeName = casino.outcome === 'red' ? 'красное' : 'чёрное';
+  result.textContent = `Выпало ${outcomeName}`;
+  inner.appendChild(result);
+
+  const sub = document.createElement('div');
+  sub.className = 'mp-casino-banner-sub';
+  const betName = casino.color === 'red' ? 'красное' : 'чёрное';
+  const playerName = casino.slot != null ? mpSlotDisplayName(casino.slot) : 'Игрок';
+  sub.textContent = `${playerName} ставил ${MP_CURRENCY}${casino.amount} на ${betName} · ${casino.win ? 'выигрыш' : 'проигрыш'} ${casino.win ? '+' : '−'}${MP_CURRENCY}${casino.amount}`;
   inner.appendChild(sub);
 
   wrap.appendChild(inner);
