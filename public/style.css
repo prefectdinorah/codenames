@@ -3184,6 +3184,150 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   .mp-modal { max-height: 96vh; }
 }
 
+/* ─── Monopoly mobile layout ─────────────────────────────── */
+@media (max-width: 700px) {
+  body.gm-monopoly { overflow-x: hidden; }
+  body.gm-monopoly .game-screen { min-height: 100svh; }
+  body.gm-monopoly .top-bar {
+    position: sticky;
+    top: 0;
+    z-index: 80;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    padding: max(8px, env(safe-area-inset-top)) 10px 8px;
+  }
+  body.gm-monopoly .top-center { display: none; }
+  body.gm-monopoly .top-left { min-width: 0; flex-wrap: wrap; }
+  body.gm-monopoly .top-right { justify-self: end; }
+  body.gm-monopoly .name-editor input { width: 84px; padding: 4px 7px; font-size: 12px; }
+  body.gm-monopoly .name-editor button { padding: 4px 8px; }
+  body.gm-monopoly .info-bar {
+    position: sticky;
+    top: 48px;
+    z-index: 75;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+  }
+  body.gm-monopoly .turn-indicator { font-size: 18px; line-height: 1; }
+  body.gm-monopoly .action-buttons { margin-left: auto; }
+
+  .monopoly-center { min-height: auto; }
+  .mp-page-grid { display: flex; flex-direction: column; min-height: auto; }
+
+  .mp-aside-left {
+    order: 1;
+    padding: 8px 10px 9px;
+    border-right: 0;
+    border-bottom: 0.5px solid var(--mp-hairline);
+    gap: 8px;
+    overflow: hidden;
+  }
+  .mp-aside-left .mp-aside-h,
+  .mp-aside-left .mp-aside-counter { display: none; }
+  .mp-player-rows {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 2px 3px;
+    scrollbar-width: none;
+  }
+  .mp-player-rows::-webkit-scrollbar { display: none; }
+  .mp-player-row {
+    flex: 0 0 148px;
+    min-width: 148px;
+    background: rgba(251, 246, 232, 0.72);
+    border: 0.5px solid var(--mp-hairline);
+    padding: 8px;
+    border-radius: 8px;
+  }
+  .mp-player-row.is-empty-slot { flex-basis: 120px; min-width: 120px; margin: 0; }
+  .mp-prow-name {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 96px;
+  }
+  .mp-prow-stats { font-size: 10px; white-space: nowrap; }
+  .mp-aside-left > div:nth-child(2) { display: none; }
+
+  .mp-board-col {
+    order: 2;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 10px 6px 120px;
+    min-height: auto;
+  }
+  .mp-board-wrap { width: 100%; overflow: visible; }
+  .mp-board {
+    --mp-board-size: min(96vw, 58svh);
+    --mp-tab-h: 13px;
+  }
+  .mp-brand { font-size: clamp(24px, 9vw, 38px); letter-spacing: -0.8px; }
+  .mp-brand-sub { display: none; }
+  .mp-tile-name { font-size: 8px; }
+  .mp-tile-tab { font-size: 8px; gap: 1px; }
+  .mp-tile-tab .mp-tab-cur { font-size: 7px; }
+  .mp-tile-mortgage { font-size: 6px; padding: 1px 3px; letter-spacing: 0.5px; }
+  .mp-tile-house { font-size: 7px; }
+  .mp-tile-hotel { font-size: 13px; }
+  .mp-token { width: 18px; height: 18px; font-size: 9px; }
+
+  .mp-action-bar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 95;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 10px;
+    justify-content: space-between;
+    gap: 8px;
+    border-radius: 12px;
+    box-shadow: 0 10px 34px rgba(42, 36, 24, 0.22);
+  }
+  .mp-action-status { min-width: 86px; padding-right: 8px; margin-right: 0; }
+  .mp-action-status-label { font-size: 8px; letter-spacing: 1.2px; }
+  .mp-action-status-name { font-size: 15px; }
+  .mp-action-dice { min-height: 36px; }
+  .mp-die-svg { width: 34px; height: 34px; padding: 4px; }
+  .mp-action-btns { gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+  .mp-cta { min-height: 42px; padding: 10px 12px; font-size: 11px; letter-spacing: 1px; }
+  .mp-debug-dice select { width: 38px; padding: 8px 4px; }
+  .mp-casino-controls { min-width: min(210px, 52vw); }
+
+  .mp-aside-right {
+    order: 3;
+    border-left: 0;
+    border-top: 0.5px solid var(--mp-hairline);
+    padding: 12px 12px 130px;
+    gap: 16px;
+  }
+  .mp-deed-title { font-size: 24px; margin-bottom: 14px; }
+  .mp-deed-rows { gap: 9px; margin-bottom: 14px; }
+  .mp-rent-table { gap: 5px; }
+  .mp-deed-actions { flex-direction: column; }
+  .mp-spec-counter,
+  .mp-spec-list,
+  .mp-spec-empty { display: none; }
+
+  .mp-modal-overlay { padding: 8px; align-items: flex-end; }
+  .mp-modal { max-height: 92svh; border-radius: 14px 14px 8px 8px; }
+  .mp-modal-head,
+  .mp-modal-foot { padding-left: 16px; padding-right: 16px; }
+  .mp-casino-banner,
+  .mp-card-banner { width: calc(100vw - 28px); }
+  .mp-casino-banner-inner,
+  .mp-card-banner-inner { min-width: 0; width: 100%; box-sizing: border-box; }
+}
+
 /* ============================================================
    ADMIN PANEL (monopoly editor) — warm-paper theme
    ============================================================ */
