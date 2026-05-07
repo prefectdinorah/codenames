@@ -63,7 +63,8 @@ body {
 .divider { color: #666; font-size: 14px; }
 .error { color: #e74c3c; font-size: 14px; }
 .mode-select,
-.theme-select {
+.theme-select,
+.theme-select-game {
   padding: 12px 16px;
   border: 2px solid #333;
   border-radius: 8px;
@@ -75,7 +76,14 @@ body {
   width: 100%;
 }
 .mode-select:focus,
-.theme-select:focus { outline: none; border-color: #3498db; }
+.theme-select:focus,
+.theme-select-game:focus { outline: none; border-color: #3498db; }
+.theme-select-game {
+  width: auto;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-width: 1px;
+}
 
 .game-mode-badge {
   font-size: 11px;
@@ -561,6 +569,12 @@ body {
   font-size: 11px;
 }
 .spectators-block .btn-spectate:hover { background: rgba(255,255,255,0.2); }
+.player-draggable { cursor: grab; }
+.player-draggable:active { cursor: grabbing; }
+.player-dropzone.is-drag-over {
+  outline: 2px dashed currentColor;
+  outline-offset: 3px;
+}
 
 /* ========== Pause overlay ========== */
 .pause-overlay {
@@ -1401,7 +1415,8 @@ body.theme-paper .join-box h1 {
 }
 body.theme-paper .join-box input,
 body.theme-paper .mode-select,
-body.theme-paper .theme-select {
+body.theme-paper .theme-select,
+body.theme-paper .theme-select-game {
   background: #fbf6e8;
   color: #2a2418;
   border-color: rgba(42, 36, 24, 0.22);
@@ -1409,7 +1424,8 @@ body.theme-paper .theme-select {
 }
 body.theme-paper .join-box input:focus,
 body.theme-paper .mode-select:focus,
-body.theme-paper .theme-select:focus {
+body.theme-paper .theme-select:focus,
+body.theme-paper .theme-select-game:focus {
   border-color: #b85c3e;
 }
 body.theme-paper .divider,
@@ -1579,6 +1595,36 @@ body.theme-paper:not(.gm-monopoly) .winner-overlay {
   .info-bar { flex-direction: column; gap: 6px; }
   .clue-form { flex-wrap: wrap; }
   .clue-form input[type="text"] { width: 100%; }
+}
+
+/* Codenames keeps the full desktop-style table on phones. */
+@media (max-width: 800px) {
+  body.game-codenames .game-screen {
+    max-width: 1200px;
+    min-width: 760px;
+    padding: 10px 16px;
+  }
+  body.game-codenames .top-bar {
+    flex-direction: row;
+    align-items: center;
+  }
+  body.game-codenames .info-bar {
+    flex-direction: row;
+    gap: 14px;
+  }
+  body.game-codenames .game-body {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  body.game-codenames .clue-sidebar {
+    display: flex;
+  }
+  body.game-codenames .board-area {
+    width: auto;
+  }
+  body.game-codenames .card {
+    font-size: clamp(9px, 1.8vw, 15px);
+  }
 }
 
 /* ============================================================

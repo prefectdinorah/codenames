@@ -48,6 +48,10 @@
         <div id="scores-bar" class="scores-bar"></div>
       </div>
       <div class="top-right">
+        <select id="theme-select-game" class="theme-select-game" title="Стиль">
+          <option value="dark">Тёмный</option>
+          <option value="paper">Светлый</option>
+        </select>
         <div id="name-editor" class="name-editor">
           <input type="text" id="name-input" maxlength="20" autocomplete="off" placeholder="Имя">
           <button id="btn-change-name" title="Сменить имя">&#10003;</button>
@@ -100,6 +104,7 @@
               <label>Таймер <select id="sc-timer"><option value="60">60с</option><option value="90" selected>90с</option><option value="120">120с</option><option value="180">180с</option></select></label>
               <label>Цель <select id="sc-target"><option value="5">5</option><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option><option value="30">30</option></select></label>
               <label>Сложность <select id="sc-difficulty"><option value="normal">Нормальная</option><option value="hard">Сложная</option></select></label>
+              <label>Пропуск <select id="sc-skip"><option value="true">-1 очко</option><option value="false">0 очков</option></select></label>
             </div>
             <!-- Monopoly settings -->
             <div id="settings-monopoly" class="hidden">

@@ -10,6 +10,17 @@ let selectedTheme = localStorage.getItem('codenames-theme') || 'dark';
 function applyVisualTheme(gameMode = state ? state.gameMode : null) {
   document.body.classList.toggle('theme-paper', selectedTheme === 'paper');
   document.body.classList.toggle('gm-monopoly', gameMode === 'monopoly');
+  document.body.classList.toggle('game-codenames', gameMode === 'codenames');
+  const joinSel = $('#theme-select');
+  const gameSel = $('#theme-select-game');
+  if (joinSel && joinSel.value !== selectedTheme) joinSel.value = selectedTheme;
+  if (gameSel && gameSel.value !== selectedTheme) gameSel.value = selectedTheme;
+}
+
+function setVisualTheme(value) {
+  selectedTheme = value === 'paper' ? 'paper' : 'dark';
+  localStorage.setItem('codenames-theme', selectedTheme);
+  applyVisualTheme(state ? state.gameMode : null);
 }
 
 // ===== Saved name =====
@@ -55,10 +66,9 @@ $('#mode-select').onchange = () => {
   selectedMode = $('#mode-select').value;
 };
 $('#theme-select').onchange = () => {
-  selectedTheme = $('#theme-select').value === 'paper' ? 'paper' : 'dark';
-  localStorage.setItem('codenames-theme', selectedTheme);
-  applyVisualTheme(state ? state.gameMode : null);
+  setVisualTheme($('#theme-select').value);
 };
+$('#theme-select-game').onchange = () => setVisualTheme($('#theme-select-game').value);
 
 // ===== Join =====
 $('#btn-create').onclick = () => {
@@ -136,6 +146,7 @@ $('#btn-apply-settings').onclick = () => {
       timerDuration: $('#sc-timer').value,
       targetScore: $('#sc-target').value,
       difficulty: $('#sc-difficulty').value,
+      skipPenalty: $('#sc-skip').value,
     });
   } else if (state.gameMode === 'whoami') {
     send({
@@ -192,6 +203,7 @@ function render() {
 
   // Body classes for local visual theme + game-mode-specific theming.
   applyVisualTheme(gm);
+  $('#theme-select-game').classList.toggle('hidden', gm === 'monopoly');
 
   // Toggle game areas
   $('#codenames-area').classList.toggle('hidden', gm !== 'codenames');
@@ -229,6 +241,7 @@ function render() {
       $('#sc-timer').value = state.settings.timerDuration;
       $('#sc-target').value = state.settings.targetScore;
       $('#sc-difficulty').value = state.settings.difficulty;
+      $('#sc-skip').value = state.settings.skipPenalty === false ? 'false' : 'true';
     } else if (gm === 'whoami') {
       $('#sw-mode').value = state.settings.mode;
       $('#sw-timer').value = state.settings.turnDuration;
@@ -347,6 +360,10 @@ function renderScores() {
       isActive = teamId === state.teams[state.currentTeamIndex] && state.phase !== 'finished';
     }
     if (isActive) badge.style.outline = `2px solid ${info.color}`;
+    if (gm === 'codenames' && state.eliminatedTeams && state.eliminatedTeams.includes(teamId)) {
+      badge.style.opacity = '0.45';
+      badge.style.textDecoration = 'line-through';
+    }
 
     const total = gm === 'codenames' ? state.totals[teamId] : state.targetScore;
     badge.innerHTML = `<span class="s-label">${esc(info.name)}</span>${state.scores[teamId]} / ${total}`;
@@ -947,8 +964,8 @@ function renderWhoamiArea() {
     }
     card.appendChild(tablet);
 
-    // Assign form (setup phase, can assign to others, not yourself)
-    if (state.wmPhase === 'setup' && !isMe && isPlayer) {
+    // Free word board: anyone in game can write/change any card.
+    if (isPlayer) {
       const form = document.createElement('div');
       form.className = 'wm-assign-form';
       const input = document.createElement('input');
@@ -972,15 +989,6 @@ function renderWhoamiArea() {
     grid.appendChild(card);
   }
   area.appendChild(grid);
-
-  // Start button (host, setup, all ready)
-  if (state.wmPhase === 'setup' && isHost && state.allReady && playerIds.length >= 2) {
-    const btn = document.createElement('button');
-    btn.className = 'alias-btn alias-btn-start';
-    btn.textContent = 'Начать игру';
-    btn.onclick = () => send({ type: 'start-game' });
-    area.appendChild(btn);
-  }
 
   // Turns mode: guess + skip
   if (state.wmPhase === 'playing' && state.wmMode === 'turns' && isPlayer) {
@@ -1240,7 +1248,7 @@ function renderCrocodileArea() {
 
         const skipBtn = document.createElement('button');
         skipBtn.className = 'croc-skip-btn';
-        skipBtn.textContent = 'Пропустить (-1)';
+        skipBtn.textContent = state.skipPenalty === false ? 'Пропустить' : 'Пропустить (-1)';
         skipBtn.onclick = () => send({ type: 'croc-skip' });
         toolbar.appendChild(skipBtn);
 
@@ -1482,6 +1490,33 @@ function mpUnmortgageCost(sq) {
   return Math.ceil(mpMortgageValue(sq) * 1.1);
 }
 
+function setupPlayerDrag(el, playerId) {
+  if (!state.you || state.you.id !== state.hostId || !playerId) return;
+  el.draggable = true;
+  el.classList.add('player-draggable');
+  el.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', playerId);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+}
+
+function setupPlayerDrop(el, payload) {
+  if (!state.you || state.you.id !== state.hostId) return;
+  el.classList.add('player-dropzone');
+  el.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    el.classList.add('is-drag-over');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('is-drag-over'));
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    el.classList.remove('is-drag-over');
+    const playerId = e.dataTransfer.getData('text/plain');
+    if (!playerId) return;
+    send({ type: 'move-player', playerId, ...payload });
+  });
+}
+
 function mpSendRollDice() {
   const you = state.you;
   if (you && you.name === 'baron') {
@@ -1701,8 +1736,10 @@ function mpBuildLeftAside() {
 
     const row = document.createElement('div');
     row.className = 'mp-player-row';
+    if (!isPlaying) setupPlayerDrop(row, { team: 'player', slot: i });
 
     if (occupantId) {
+      setupPlayerDrag(row, occupantId);
       // Filled slot
       if (isPlaying && i === state.currentSlot) row.classList.add('is-active');
       if (ps && ps.bankrupt) row.classList.add('is-bankrupt');
@@ -2191,6 +2228,7 @@ function mpBuildSpectatorsSection() {
       const row = document.createElement('div');
       row.className = 'mp-spec-row';
       row.textContent = p.name + (state.you && state.you.id === p.id ? ' · вы' : '');
+    setupPlayerDrag(row, p.id);
       list.appendChild(row);
     }
     section.appendChild(list);
@@ -3281,6 +3319,7 @@ function renderPlayerPanel() {
     block.className = 'player-team-block';
     block.style.background = 'rgba(155,89,182,0.08)';
     block.style.borderLeft = '3px solid #9b59b6';
+    setupPlayerDrop(block, { team: 'player' });
     const h4 = document.createElement('h4');
     h4.textContent = 'Игроки';
     h4.style.color = '#9b59b6';
@@ -3291,6 +3330,7 @@ function renderPlayerPanel() {
       const entry = document.createElement('div');
       entry.className = 'operative-entry';
       entry.textContent = p.name;
+      setupPlayerDrag(entry, p.id);
       if (p.id === state.currentAsker && state.sfPhase === 'playing') {
         entry.style.fontWeight = '700';
         entry.textContent = '\u2605 ' + p.name;
@@ -3311,11 +3351,13 @@ function renderPlayerPanel() {
     const spectators = state.players.filter((p) => !p.team);
     const specBlock = document.createElement('div');
     specBlock.className = 'spectators-block';
+    setupPlayerDrop(specBlock, { team: null });
     specBlock.innerHTML = `<h4>\uD83D\uDC41 Зрители (${spectators.length})</h4>`;
     for (const p of spectators) {
       const entry = document.createElement('div');
       entry.className = 'spectator-entry';
       entry.textContent = p.name;
+      setupPlayerDrag(entry, p.id);
       specBlock.appendChild(entry);
     }
     if (you && you.team === 'player') {
@@ -3335,6 +3377,7 @@ function renderPlayerPanel() {
     block.className = 'player-team-block';
     block.style.background = hexToRgba(info.color, 0.08);
     block.style.borderLeft = `3px solid ${info.color}`;
+    setupPlayerDrop(block, { team: teamId, role: gm === 'codenames' ? 'operative' : 'player' });
 
     const h4 = document.createElement('h4');
     h4.textContent = info.name;
@@ -3345,11 +3388,13 @@ function renderPlayerPanel() {
       // Spymaster slot
       const spySlot = document.createElement('div');
       spySlot.className = 'spymaster-slot';
+      setupPlayerDrop(spySlot, { team: teamId, role: 'spymaster' });
       const slotLabel = document.createElement('span');
       slotLabel.className = 'slot-label';
       slotLabel.textContent = '\u2605 Ведущий:';
       spySlot.appendChild(slotLabel);
       const spy = state.players.find((p) => p.team === teamId && p.role === 'spymaster');
+      if (spy) setupPlayerDrag(spySlot, spy.id);
       const slotName = document.createElement('span');
       slotName.className = 'slot-name';
       slotName.textContent = spy ? spy.name : '\u2014';
@@ -3365,6 +3410,7 @@ function renderPlayerPanel() {
         const entry = document.createElement('div');
         entry.className = 'operative-entry';
         entry.textContent = p.name;
+        setupPlayerDrag(entry, p.id);
         opList.appendChild(entry);
       }
       block.appendChild(opList);
@@ -3397,6 +3443,7 @@ function renderPlayerPanel() {
       for (const p of teamPlayers) {
         const entry = document.createElement('div');
         entry.className = 'operative-entry';
+        setupPlayerDrag(entry, p.id);
         const isHighlighted = (p.id === state.explainerId && state.phase === 'explaining')
           || (p.id === state.drawerId && state.crocPhase === 'drawing');
         if (isHighlighted) {
@@ -3425,6 +3472,7 @@ function renderPlayerPanel() {
   const spectators = state.players.filter((p) => !p.team);
   const specBlock = document.createElement('div');
   specBlock.className = 'spectators-block';
+  setupPlayerDrop(specBlock, { team: null });
   const specH4 = document.createElement('h4');
   specH4.textContent = `\uD83D\uDC41 Зрители (${spectators.length})`;
   specBlock.appendChild(specH4);
@@ -3432,6 +3480,7 @@ function renderPlayerPanel() {
     const entry = document.createElement('div');
     entry.className = 'spectator-entry';
     entry.textContent = p.name;
+    setupPlayerDrag(entry, p.id);
     specBlock.appendChild(entry);
   }
   if (you && you.team) {
@@ -3570,7 +3619,9 @@ function renderWinnerOverlay() {
   const winner = state.winner || (state.teams && state.teams[state.currentTeamIndex]);
   const info = winner ? state.teamInfo[winner] : null;
 
-  if (state.assassinLoser && info) {
+  if (state.assassinLoser && state.gameMode === 'codenames' && state.eliminatedTeams && state.eliminatedTeams.length && !state.winner) {
+    text.textContent = `${state.eliminatedTeams.map((t) => state.teamInfo[t]?.name || t).join(', ')} выбыли!`;
+  } else if (state.assassinLoser && info) {
     text.textContent = `${info.name} проиграли! (убийца)`;
   } else if (info) {
     text.textContent = `${info.name} победили!`;

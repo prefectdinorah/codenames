@@ -248,7 +248,8 @@ function createCodenamesGame(settings) {
   const selected = shuffle(codenamesWords).slice(0, totalCards);
   const availableTeams = TEAM_IDS.slice(0, teamCount);
   // This order is both the turn order and the decreasing-card-count order.
-  // First team gets +1 word, each following team gets one fewer.
+  // First team gets +1 word, second gets base, everyone after that gets base-1
+  // so the gap never exceeds two words.
   const teams = shuffle([...availableTeams]);
   const firstTeam = teams[0];
 
@@ -256,7 +257,7 @@ function createCodenamesGame(settings) {
   const distribution = [];
   for (let i = 0; i < basePerTeam + 1; i++) distribution.push(teams[0]);
   for (let ti = 1; ti < teams.length; ti++) {
-    const count = Math.max(1, basePerTeam - (ti - 1));
+    const count = Math.max(1, basePerTeam - Math.min(ti - 1, 1));
     for (let i = 0; i < count; i++) distribution.push(teams[ti]);
   }
   distribution.push('assassin');
@@ -275,6 +276,7 @@ function createCodenamesGame(settings) {
   return {
     cards, teams, turn: firstTeam, firstTeam,
     clue: null, winner: null, assassinLoser: false,
+    eliminatedTeams: [],
     scores, totals, clueHistory: [],
     paused: true, timerEnd: null, timerRemaining: null,
     playerVotes: {}, confirmingCard: null, confirmAt: null,
@@ -300,6 +302,7 @@ function createAliasGame(settings) {
     scores,
     targetScore: settings.targetScore || 30,
     difficulty,
+    skipPenalty: settings.skipPenalty !== false,
     currentTeamIndex: 0,
     explainerId: null,
     nextExplainerId: null,
@@ -453,7 +456,7 @@ function createWhoamiGame(settings) {
   return {
     teams: [],
     scores: {},
-    phase: 'setup',      // setup | playing | finished
+    phase: 'setup',      // free board; no formal start/end required
     mode: settings.mode || 'free',  // 'free' | 'turns'
     turnDuration: settings.turnDuration || 120,
     assignments: {},     // playerId -> { word: string|null, assignedBy: string|null }
@@ -499,6 +502,7 @@ function createCrocodileGame(settings) {
     timerEnd: null,
     timerRemaining: null,
     guessLog: [],
+    turnWords: [],
   };
 }
 
@@ -581,7 +585,7 @@ function createRoom(hostId, gameMode) {
     settings = { roundDuration: 480, locationCount: 30 };
     game = createSpyfallGame(settings);
   } else if (gameMode === 'crocodile') {
-    settings = { teamCount: 2, timerDuration: 90, targetScore: 15, difficulty: 'normal' };
+    settings = { teamCount: 2, timerDuration: 90, targetScore: 15, difficulty: 'normal', skipPenalty: true };
     game = createCrocodileGame(settings);
   } else if (gameMode === 'whoami') {
     settings = { mode: 'free', turnDuration: 120 };
@@ -601,6 +605,75 @@ function createRoom(hostId, gameMode) {
   };
   rooms.set(code, room);
   return room;
+}
+
+function placePlayerInRoom(room, targetId, msg) {
+  const player = room.players.get(targetId);
+  if (!player) return false;
+
+  const team = msg.team || null;
+  const goingSpectator = !team;
+
+  if (room.gameMode === 'monopoly') {
+    if (team === 'player') {
+      if (room.game.phase !== 'lobby') return false;
+      const requestedSlot = parseInt(msg.slot, 10);
+      if (!Number.isFinite(requestedSlot) || requestedSlot < 0 || requestedSlot >= room.game.maxSlots) return false;
+      const occupant = mpPlayerOfSlot(room, requestedSlot);
+      if (occupant && occupant !== targetId) return false;
+      if (player.slot != null && player.slot !== requestedSlot) player.slot = null;
+      player.slot = requestedSlot;
+      player.team = 'player';
+      player.role = 'player';
+      return true;
+    }
+    player.slot = null;
+    player.team = null;
+    player.role = null;
+    return true;
+  }
+
+  if (room.gameMode === 'whoami') {
+    const game = room.game;
+    if (team === 'player' && !game.assignments[targetId]) {
+      game.assignments[targetId] = { word: null, assignedBy: null };
+      game.notebooks[targetId] = '';
+    } else if (!team && game.assignments[targetId]) {
+      delete game.assignments[targetId];
+      delete game.notebooks[targetId];
+    }
+  }
+
+  if (room.gameMode === 'spyfall' || room.gameMode === 'whoami') {
+    if (team && team !== 'player') return false;
+    player.team = team;
+    player.role = team ? 'player' : null;
+    return true;
+  }
+
+  if (team && !room.game.teams.includes(team)) return false;
+
+  if (room.gameMode === 'codenames') {
+    const role = msg.role || 'operative';
+    if (role !== 'spymaster' && role !== 'operative') return false;
+    if (team && role === 'spymaster') {
+      for (const [id, p] of room.players) {
+        if (id !== targetId && p.team === team && p.role === 'spymaster') return false;
+      }
+    }
+    delete room.game.playerVotes[targetId];
+    checkVoteConsensus(room);
+    player.role = team ? role : null;
+  } else {
+    player.role = team ? 'player' : null;
+  }
+
+  player.team = team;
+
+  if (room.gameMode === 'alias' && room.game.phase === 'waiting') {
+    room.game.nextExplainerIds = computeAllNextExplainers(room);
+  }
+  return true;
 }
 
 // ============================================================
@@ -723,8 +796,14 @@ function addTime(room, seconds) {
 
 function codenamesNextTurn(room) {
   const game = room.game;
-  const idx = game.teams.indexOf(game.turn);
-  game.turn = game.teams[(idx + 1) % game.teams.length];
+  const activeTeams = game.teams.filter((t) => !(game.eliminatedTeams || []).includes(t));
+  if (activeTeams.length <= 1) {
+    game.winner = activeTeams[0] || null;
+    clearTimer(room);
+    return;
+  }
+  const idx = activeTeams.indexOf(game.turn);
+  game.turn = activeTeams[(idx + 1) % activeTeams.length];
   game.clue = null;
   clearVotes(room);
   startCodenamesTimer(room);
@@ -732,6 +811,7 @@ function codenamesNextTurn(room) {
 
 function checkCodenamesWin(game) {
   for (const t of game.teams) {
+    if ((game.eliminatedTeams || []).includes(t)) continue;
     if (game.scores[t] >= game.totals[t]) { game.winner = t; return; }
   }
 }
@@ -788,8 +868,19 @@ function executeGuess(room, cardIndex) {
 
   if (card.type === 'assassin') {
     if (game.teams.length === 2) game.winner = game.teams.find((t) => t !== game.turn);
-    else { game.winner = game.turn; game.assassinLoser = true; }
-    clearTimer(room);
+    else {
+      if (!game.eliminatedTeams) game.eliminatedTeams = [];
+      if (!game.eliminatedTeams.includes(game.turn)) game.eliminatedTeams.push(game.turn);
+      game.assassinLoser = true;
+      const activeTeams = game.teams.filter((t) => !game.eliminatedTeams.includes(t));
+      if (activeTeams.length <= 1) {
+        game.winner = activeTeams[0] || null;
+        clearTimer(room);
+      } else {
+        codenamesNextTurn(room);
+      }
+    }
+    if (game.winner) clearTimer(room);
     return;
   }
   if (game.teams.includes(card.type)) game.scores[card.type]++;
@@ -826,6 +917,7 @@ function getCodenamesState(room, playerId) {
     clue: room.game.clue,
     winner: room.game.winner,
     assassinLoser: room.game.assassinLoser,
+    eliminatedTeams: room.game.eliminatedTeams || [],
     totals: room.game.totals,
     clueHistory: room.game.clueHistory,
     cardVotes: getCardVoteCounts(room),
@@ -878,6 +970,8 @@ function getCrocodileState(room, playerId) {
     drawerId: game.drawerId,
     currentWord: isDrawer ? game.currentWord : null,
     guessLog: game.guessLog,
+    turnWords: game.turnWords || [],
+    skipPenalty: game.skipPenalty,
     winner: game.winner,
   };
 }
@@ -1073,57 +1167,15 @@ wss.on('connection', (ws, req) => {
       if (!player) return;
       const goingSpectator = !msg.team;
       if (currentRoom.game.paused && !goingSpectator && currentRoom.gameMode === 'codenames') return;
+      if (placePlayerInRoom(currentRoom, playerId, msg)) broadcastRoom(currentRoom);
+    }
 
-      const team = msg.team || null;
-
-      // Whoami: register/unregister player in assignments
-      if (currentRoom.gameMode === 'whoami') {
-        const game = currentRoom.game;
-        if (team === 'player' && !game.assignments[playerId]) {
-          game.assignments[playerId] = { word: null, assignedBy: null };
-          game.notebooks[playerId] = '';
-        } else if (!team && game.assignments[playerId]) {
-          delete game.assignments[playerId];
-          delete game.notebooks[playerId];
-        }
-      }
-      const role = msg.role || null;
-      if (currentRoom.gameMode === 'spyfall' || currentRoom.gameMode === 'whoami' || currentRoom.gameMode === 'monopoly') {
-        if (team && team !== 'player') return;
-        if (currentRoom.gameMode === 'monopoly') {
-          if (team === 'player') {
-            if (currentRoom.game.phase !== 'lobby') return; // can't join mid-game
-            // Slot must be specified; must be free or already mine
-            const requestedSlot = parseInt(msg.slot, 10);
-            if (!Number.isFinite(requestedSlot) || requestedSlot < 0 || requestedSlot >= currentRoom.game.maxSlots) return;
-            const occupant = mpPlayerOfSlot(currentRoom, requestedSlot);
-            if (occupant && occupant !== playerId) return; // taken
-            // Release any previous slot this player held
-            if (player.slot != null && player.slot !== requestedSlot) player.slot = null;
-            player.slot = requestedSlot;
-          } else {
-            // Spectator — release slot
-            player.slot = null;
-          }
-        }
-      } else {
-        if (team && !currentRoom.game.teams.includes(team)) return;
-      }
-      if (currentRoom.gameMode === 'codenames') {
-        if (role && role !== 'spymaster' && role !== 'operative') return;
-        if (team && role === 'spymaster') {
-          for (const [id, p] of currentRoom.players) {
-            if (id !== playerId && p.team === team && p.role === 'spymaster') return;
-          }
-        }
-        delete currentRoom.game.playerVotes[playerId];
-        checkVoteConsensus(currentRoom);
-        player.role = team ? (role || 'operative') : null;
-      } else {
-        player.role = team ? 'player' : null;
-      }
-      player.team = team;
-      broadcastRoom(currentRoom);
+    if (msg.type === 'move-player') {
+      if (!currentRoom) return;
+      if (playerId !== currentRoom.hostId) return;
+      const targetId = String(msg.playerId || '');
+      if (!currentRoom.players.has(targetId)) return;
+      if (placePlayerInRoom(currentRoom, targetId, msg)) broadcastRoom(currentRoom);
     }
 
     if (msg.type === 'toggle-pause') {
@@ -1247,6 +1299,7 @@ function handleCodenamesMsg(room, playerId, msg) {
     if (game.paused || game.winner) return;
     const player = room.players.get(playerId);
     if (!player || player.role !== 'spymaster' || player.team !== game.turn) return;
+    if ((game.eliminatedTeams || []).includes(player.team)) return;
     const count = parseInt(msg.count, 10);
     if (!msg.word || isNaN(count) || count < 0) return;
     const clue = { word: msg.word.trim(), count, team: game.turn };
@@ -1260,6 +1313,7 @@ function handleCodenamesMsg(room, playerId, msg) {
     if (game.paused || game.winner || !game.clue) return;
     const player = room.players.get(playerId);
     if (!player || player.role !== 'operative' || player.team !== game.turn) return;
+    if ((game.eliminatedTeams || []).includes(player.team)) return;
     const card = game.cards[msg.index];
     if (!card || card.revealed) return;
     if (game.playerVotes[playerId] === msg.index) delete game.playerVotes[playerId];
@@ -1273,6 +1327,7 @@ function handleCodenamesMsg(room, playerId, msg) {
     if (game.paused || game.winner) return;
     const player = room.players.get(playerId);
     if (!player || player.team !== game.turn) return;
+    if ((game.eliminatedTeams || []).includes(player.team)) return;
     clearVotes(room);
     codenamesNextTurn(room);
     broadcastRoom(room);
@@ -1586,7 +1641,8 @@ function handleCrocodileMsg(room, playerId, msg, ws) {
     const timerDuration = Math.max(30, Math.min(300, parseInt(msg.timerDuration, 10) || 90));
     const targetScore = Math.max(5, Math.min(50, parseInt(msg.targetScore, 10) || 15));
     const difficulty = msg.difficulty === 'hard' ? 'hard' : 'normal';
-    room.settings = { teamCount, timerDuration, targetScore, difficulty };
+    const skipPenalty = msg.skipPenalty !== 'false' && msg.skipPenalty !== false;
+    room.settings = { teamCount, timerDuration, targetScore, difficulty, skipPenalty };
     clearTimer(room);
     room.game = createCrocodileGame(room.settings);
     const validTeams = TEAM_IDS.slice(0, teamCount);
@@ -1606,6 +1662,7 @@ function handleCrocodileMsg(room, playerId, msg, ws) {
     game.drawerId = drawerId;
     game.phase = 'drawing';
     game.guessLog = [];
+    game.turnWords = [];
     crocodileNextWord(game);
     startCrocodileTimer(room);
     broadcastRoom(room);
@@ -1627,7 +1684,21 @@ function handleCrocodileMsg(room, playerId, msg, ws) {
     game.guessLog.push({ playerId, playerName: player.name, text, correct: isCorrect });
 
     if (isCorrect) {
-      crocodileEndTurn(room, true);
+      const teamId = game.teams[game.currentTeamIndex];
+      game.scores[teamId]++;
+      game.turnWords.push({ word: game.currentWord, result: 'correct' });
+      if (game.scores[teamId] >= game.targetScore) {
+        clearTimer(room);
+        game.phase = 'finished';
+        game.winner = teamId;
+      } else {
+        crocodileNextWord(game);
+        game.guessLog = [];
+        const data = JSON.stringify({ type: 'croc-clear' });
+        for (const [, p] of room.players) {
+          if (p.ws.readyState === 1) p.ws.send(data);
+        }
+      }
     }
 
     broadcastRoom(room);
@@ -1636,7 +1707,8 @@ function handleCrocodileMsg(room, playerId, msg, ws) {
   if (msg.type === 'croc-skip') {
     if (game.phase !== 'drawing' || playerId !== game.drawerId) return;
     const teamId = game.teams[game.currentTeamIndex];
-    game.scores[teamId] = Math.max(0, game.scores[teamId] - 1);
+    game.turnWords.push({ word: game.currentWord, result: 'skipped' });
+    if (game.skipPenalty) game.scores[teamId] = Math.max(0, game.scores[teamId] - 1);
     crocodileNextWord(game);
     game.guessLog = [];
     // Clear canvas for all
@@ -1722,10 +1794,9 @@ function handleWhoamiMsg(room, playerId, msg) {
 
   // Assign a word to another player (anyone can do this)
   if (msg.type === 'assign-word') {
-    if (game.phase !== 'setup') return;
     const targetId = msg.targetId;
     const word = (msg.word || '').trim().slice(0, 40);
-    if (!word || targetId === playerId) return;
+    if (!word) return;
     if (!game.assignments[targetId]) return;
     game.assignments[targetId] = { word, assignedBy: playerId };
     broadcastRoom(room);
