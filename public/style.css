@@ -2468,6 +2468,21 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   color: var(--mp-ink);
   margin-bottom: 22px;
 }
+.mp-deed-image {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0.5px solid var(--mp-hairline);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  margin: -8px 0 18px;
+}
+.mp-deed-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
 .mp-deed-rows { display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
 .mp-deed-row {
   display: flex;
@@ -3228,30 +3243,25 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   .mp-aside-left .mp-aside-counter { display: none; }
   .mp-player-rows {
     display: flex;
-    flex-direction: row;
-    gap: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    padding: 0 2px 3px;
-    scrollbar-width: none;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0;
   }
-  .mp-player-rows::-webkit-scrollbar { display: none; }
   .mp-player-row {
-    flex: 0 0 148px;
-    min-width: 148px;
+    width: 100%;
+    min-width: 0;
     background: rgba(251, 246, 232, 0.72);
     border: 0.5px solid var(--mp-hairline);
-    padding: 8px;
+    padding: 7px 8px;
     border-radius: 8px;
   }
-  .mp-player-row.is-empty-slot { flex-basis: 120px; min-width: 120px; margin: 0; }
+  .mp-player-row.is-empty-slot { margin: 0; }
   .mp-prow-name {
     font-size: 14px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 96px;
+    max-width: 54vw;
   }
   .mp-prow-stats { font-size: 10px; white-space: nowrap; }
   .mp-aside-left > div:nth-child(2) { display: none; }
@@ -3276,7 +3286,20 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
   .mp-tile-mortgage { font-size: 6px; padding: 1px 3px; letter-spacing: 0.5px; }
   .mp-tile-house { font-size: 7px; }
   .mp-tile-hotel { font-size: 13px; }
-  .mp-token { width: 18px; height: 18px; font-size: 9px; }
+  .mp-token { width: 14px; height: 14px; font-size: 7px; border-width: 1px; }
+  .mp-tile-corner .mp-corner-title,
+  .mp-tile-corner .mp-corner-sub {
+    display: none;
+  }
+  .mp-corner-glyph {
+    width: 100%;
+    height: 100%;
+  }
+  .mp-corner-glyph img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
 
   .mp-action-bar {
     position: fixed;
@@ -3311,6 +3334,7 @@ body.gm-monopoly .winner-text { color: #2a2418; font-family: "Instrument Serif",
     gap: 16px;
   }
   .mp-deed-title { font-size: 24px; margin-bottom: 14px; }
+  .mp-deed-image { margin: -4px 0 14px; }
   .mp-deed-rows { gap: 9px; margin-bottom: 14px; }
   .mp-rent-table { gap: 5px; }
   .mp-deed-actions { flex-direction: column; }

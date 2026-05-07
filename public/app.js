@@ -2239,6 +2239,18 @@ function mpRenderDeedInto(aside, sq) {
   title.textContent = sq.name || (sq.type === 'go' ? 'Старт' : sq.type === 'jail' ? 'Тюрьма' : sq.type === 'parking' ? 'Парковка' : sq.type === 'casino' ? 'Казино' : sq.type === 'go_to_jail' ? 'В тюрьму' : sq.type === 'chance' ? 'Шанс' : sq.type === 'chest' ? 'Казна' : sq.type === 'tax' ? 'Налог' : '—');
   aside.appendChild(title);
 
+  if (sq.image) {
+    const imgWrap = document.createElement('div');
+    imgWrap.className = 'mp-deed-image';
+    const img = document.createElement('img');
+    img.src = sq.image;
+    img.alt = sq.name || '';
+    img.loading = 'lazy';
+    img.onerror = () => imgWrap.remove();
+    imgWrap.appendChild(img);
+    aside.appendChild(imgWrap);
+  }
+
   // Type-specific info
   const rows = document.createElement('div');
   rows.className = 'mp-deed-rows';
